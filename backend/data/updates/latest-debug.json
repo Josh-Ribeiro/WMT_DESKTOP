@@ -1,0 +1,11 @@
+{
+  "version": "1.0.102",
+  "notes": "WMT Desktop Debug 1.0.102",
+  "pub_date": "2026-07-20T11:14:09Z",
+  "platforms": {
+    "windows-x86_64": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSRk8yZFJEU1RUQ1BQU0hGMjB0NC9pL3BOSVZZa09MeWozc2t2c3NZSXBXZVpNWDV6Zy9ValVJRGFwemxEV2loZlFOSUpqVDRLcWF6eVlFcm5wTnQrdlN4MUFrcDR5S1F3PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg0NTQ1NzE2CWZpbGU6V01UIERlc2t0b3AgRGVidWdfMS4wLjEwMl94NjRfZW4tVVMubXNpCmhPWEtwNDNjSWZUdldFNkFoN2dKZzQ5QVZWSm5lR24vM1FqY2pyOXgvTFhQWVQ3dDI2aGU4MWdvK0s1SUpSSktrVnRmQmIzRndmTTVucU1oQWVvaURRPT0K",
+      "url": "http://wks048-495br:8000/api/updates/WMT%20Desktop%20Debug_1.0.102_x64_en-US-debug.msi"
+    }
+  }
+}

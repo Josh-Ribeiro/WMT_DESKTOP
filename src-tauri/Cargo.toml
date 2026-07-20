@@ -1,0 +1,26 @@
+[package]
+name = "wmt-desktop"
+version = "1.0.0"
+description = "WMT Desktop - Workstation Manager Tools"
+authors = ["WMT Team"]
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2.6.2", features = [] }
+
+[dependencies]
+tauri = { version = "2.6.2", features = [] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1", features = ["full"] }
+reqwest = { version = "0.11", features = ["json"] }
+log = "0.4"
+env_logger = "0.11"
+
+[profile.release]
+codegen-units = 1
+lto = true
+
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+tauri-plugin-dialog = "2"
+tauri-plugin-updater = "2"

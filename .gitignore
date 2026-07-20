@@ -1,0 +1,61 @@
+# Dependencies and package stores
+node_modules/
+.pnpm-store/
+.venv/
+.venv-*/
+backend/venv/
+venv/
+ENV/
+env/
+
+# Build outputs
+dist/
+build/
+releases/
+src-tauri/target/
+src-tauri/meta.json
+*.pdb
+
+# Python caches
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.eggs/
+eggs/
+parts/
+sdist/
+var/
+wheels/
+.installed.cfg
+*.egg
+
+# Runtime data and generated update artifacts
+backend/data/*.json
+backend/data/*.tmp
+backend/data/updates/*.msi
+backend/data/updates/*.sig
+
+# Local env, secrets, and logs
+.env.local
+.env.*.local
+secrets/
+*.key
+logs/
+*.log
+*.zip
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.manus-logs/
+client/public/__manus__/
+
+# IDE and OS files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store

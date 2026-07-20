@@ -1,0 +1,57 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "WMT Desktop",
+  "version": "1.0.103",
+  "identifier": "com.wmt.desktop",
+  "build": {
+    "beforeBuildCommand": "corepack pnpm build",
+    "beforeDevCommand": "corepack pnpm dev",
+    "devUrl": "http://localhost:5173",
+    "frontendDist": "../dist/public"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "WMT Desktop",
+        "width": 1400,
+        "height": 900,
+        "minWidth": 800,
+        "minHeight": 600,
+        "resizable": true,
+        "fullscreen": false,
+        "focus": true,
+        "decorations": true,
+        "transparent": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "useLocalToolsDir": true,
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.ico"
+    ],
+    "targets": [
+      "msi"
+    ],
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "dangerousInsecureTransportProtocol": true,
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDhEMzI0MEQ1MTY3M0I0NQpSV1JGTzJkUkRTVFRDRDNCTnNTNWk1OWp2V05qM3o2TS8ycDlqaExEYkpjMnQ1VENhekVxWU5QZgo=",
+      "endpoints": [
+        "http://wks048-495br:8000/api/updates/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
+  }
+}
