@@ -62,6 +62,38 @@ Register-ScheduledTask -TaskName '$TaskName' -Action `$action -Trigger `$trigger
     }
 }
 
+function Set-ShareFullControl {
+    param(
+        [string]$ComputerName,
+        [string]$ShareName
+    )
+
+    # S-1-1-0 (Everyone) avoids failures caused by localized account names.
+    $trustee = ([WmiClass]"\\$ComputerName\root\cimv2:Win32_Trustee").CreateInstance()
+    $trustee.SID = [byte[]](1, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0)
+
+    $ace = ([WmiClass]"\\$ComputerName\root\cimv2:Win32_ACE").CreateInstance()
+    $ace.AccessMask = [uint32]2032127
+    $ace.AceFlags = [uint32]0
+    $ace.AceType = [uint32]0
+    $ace.Trustee = $trustee
+
+    $securityDescriptor = ([WmiClass]"\\$ComputerName\root\cimv2:Win32_SecurityDescriptor").CreateInstance()
+    $securityDescriptor.ControlFlags = [uint32]4
+    $securityDescriptor.DACL = @($ace)
+
+    $shareSecurity = Get-WmiObject `
+        -Class Win32_LogicalShareSecuritySetting `
+        -ComputerName $ComputerName `
+        -Filter "Name='$ShareName'" `
+        -ErrorAction Stop
+
+    $result = $shareSecurity.SetSecurityDescriptor($securityDescriptor)
+    if ([int]$result.ReturnValue -ne 0) {
+        throw "Falha ao definir Full Control na share $ShareName. ReturnValue=$($result.ReturnValue)"
+    }
+}
+
 $normalizedAction = $Action.Trim().ToLowerInvariant()
 $TtlMinutes = [Math]::Max(1, [Math]::Min(240, $TtlMinutes))
 $ttlSeconds = $TtlMinutes * 60
@@ -146,6 +178,9 @@ try {
             else {
                 Write-Output "Share $shareName ja existe."
             }
+
+            Set-ShareFullControl -ComputerName $HostName -ShareName $shareName
+            Write-Output "Permissao Full Control aplicada na share $shareName."
 
             try {
                 Start-RemoteCleanupTask -ComputerName $HostName -ShareName $shareName -TaskName $taskName -CleanupDelaySeconds $ttlSeconds

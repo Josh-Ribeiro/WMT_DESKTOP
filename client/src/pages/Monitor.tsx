@@ -1,6 +1,7 @@
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Sidebar } from '@/components/Sidebar';
+import { UniversalSearch } from '@/components/UniversalSearch';
 import { useAuth } from '@/hooks/useAuth';
 import { useLocation } from 'wouter';
 import { Activity, CheckCircle2, ClipboardList, Clock3, Copy, Gauge, HardDrive, Loader2, PackageSearch, Play, Printer, RefreshCw, Search, Sparkles, Wrench } from 'lucide-react';
@@ -1243,11 +1244,6 @@ export default function Monitor() {
     }
   };
 
-  const handleLookup = async (e: React.FormEvent) => {
-    e.preventDefault();
-    await runLookup(lookupHost);
-  };
-
   useEffect(() => {
     if (authLoading || !user) {
       return;
@@ -1296,31 +1292,14 @@ export default function Monitor() {
           </div>
 
           <section className="space-y-5">
-            <div className="flex flex-col gap-4 rounded-xl bg-card p-4 shadow-sm ring-1 ring-border/40 xl:flex-row xl:items-end xl:justify-between">
+            <div className="relative z-30 flex flex-col gap-4 overflow-visible rounded-xl bg-card p-4 shadow-sm ring-1 ring-border/40 xl:flex-row xl:items-end xl:justify-between">
               <div className="min-w-0">
-                <h2 className="text-lg font-semibold text-foreground">Lookup de computador</h2>
+                <h2 className="text-lg font-semibold text-foreground">Busca universal</h2>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  Pesquise um hostname ou IP na rede e veja informações básicas do equipamento.
+                  Pesquise um usuário, WKS, IP, matrícula ou serial e alterne entre os resultados sem sair do fluxo.
                 </p>
               </div>
-              <form onSubmit={handleLookup} className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] xl:min-w-[520px]">
-                <Input
-                  value={lookupHost}
-                  onChange={(e) => setLookupHost(e.target.value.toUpperCase())}
-                  placeholder="Ex.: PC-01 ou 192.168.0.10"
-                  className="min-w-0"
-                />
-                <Button type="submit" disabled={lookupLoading} className="min-w-32 sm:w-auto">
-                  {lookupLoading ? (
-                    'Pesquisando...'
-                  ) : (
-                    <>
-                      <Search size={16} className="mr-2" />
-                      Pesquisar
-                    </>
-                  )}
-                </Button>
-              </form>
+              <UniversalSearch initialValue={lookupHost} />
             </div>
 
               {lookupLoading && (

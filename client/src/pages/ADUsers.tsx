@@ -1,4 +1,4 @@
-import { FormEvent, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useLocation } from 'wouter';
 import {
   BadgeCheck,
@@ -19,7 +19,6 @@ import {
   MonitorUp,
   Phone,
   RefreshCw,
-  Search,
   ShieldAlert,
   ShieldCheck,
   Tags,
@@ -33,6 +32,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Sidebar } from '@/components/Sidebar';
+import { UniversalSearch } from '@/components/UniversalSearch';
 import { apiRequest } from '@/lib/api';
 import { useAuth } from '@/hooks/useAuth';
 
@@ -549,8 +549,7 @@ function StatusCard({ result }: { result: ADUserLookupResult }) {
 
 export default function ADUsers() {
   const { user, logout } = useAuth();
-  const [, navigate] = useLocation();
-  const [query, setQuery] = useState('');
+  const [location, navigate] = useLocation();
   const [lastQuery, setLastQuery] = useState('');
   const [searchResult, setSearchResult] = useState<ADUserSearchResult | null>(null);
   const [result, setResult] = useState<ADUserLookupResult | null>(null);
@@ -560,8 +559,7 @@ export default function ADUsers() {
   const [compareError, setCompareError] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-
-  const canSearch = query.trim().length >= 2 && !loading;
+  const initialQueryRef = useRef('');
 
   const handleLogout = async () => {
     await logout();
@@ -577,7 +575,7 @@ export default function ADUsers() {
     });
   };
 
-  const searchUsers = async (value = query) => {
+  const searchUsers = async (value: string) => {
     const clean = value.trim();
     if (clean.length < 2) return;
     setLoading(true);
@@ -654,10 +652,14 @@ export default function ADUsers() {
     }
   };
 
-  const submitLookup = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    searchUsers();
-  };
+  useEffect(() => {
+    if (!user) return;
+    const initialQuery = new URLSearchParams(window.location.search).get('query')?.trim() || '';
+    if (initialQuery.length < 2 || initialQueryRef.current === initialQuery) return;
+
+    initialQueryRef.current = initialQuery;
+    void searchUsers(initialQuery);
+  }, [location, user]);
 
   if (!user) {
     navigate('/login');
@@ -670,7 +672,7 @@ export default function ADUsers() {
 
       <main className="min-w-0 flex-1 overflow-auto">
         <div className="mx-auto flex w-full max-w-7xl flex-col gap-5 p-6 lg:p-8">
-          <section className="rounded-lg border border-border/70 bg-card/95 p-5 shadow-sm backdrop-blur">
+          <section className="relative z-30 overflow-visible rounded-lg border border-border/70 bg-card/95 p-5 shadow-sm backdrop-blur">
             <div className="flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
               <div className="min-w-0">
                 <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -688,21 +690,7 @@ export default function ADUsers() {
                 </p>
               </div>
 
-              <form onSubmit={submitLookup} className="grid w-full gap-2 sm:grid-cols-[minmax(0,1fr)_auto] xl:max-w-xl">
-                <div className="relative min-w-0">
-                  <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                  <Input
-                    value={query}
-                    onChange={(event) => setQuery(event.target.value)}
-                    placeholder="samAccountName, email, UPN ou nome"
-                    className="min-w-0 pl-9"
-                  />
-                </div>
-                <Button type="submit" className="min-w-32" disabled={!canSearch}>
-                  {loading ? <Loader2 className="animate-spin" size={16} /> : <Search size={16} />}
-                  Buscar
-                </Button>
-              </form>
+              <UniversalSearch initialValue={lastQuery} />
             </div>
           </section>
 

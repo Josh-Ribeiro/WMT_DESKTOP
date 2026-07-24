@@ -1,10 +1,10 @@
-import { FormEvent, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
 import { Progress } from '@/components/ui/progress';
 import { Sidebar } from '@/components/Sidebar';
+import { UniversalSearch } from '@/components/UniversalSearch';
 import { useApi } from '@/hooks/useApi';
 import { useAuth } from '@/hooks/useAuth';
 import { useLocation } from 'wouter';
@@ -21,7 +21,6 @@ import {
   Loader2,
   MonitorUp,
   RefreshCw,
-  Search,
   Settings,
   ShieldCheck,
   TerminalSquare,
@@ -285,7 +284,6 @@ export default function Dashboard() {
   const { data, loading, error, refetch } = useApi<DashboardData>('/api/dashboard', {
     refetchInterval: 10000,
   });
-  const [hostQuery, setHostQuery] = useState('');
   const [dismissedAttentionIds, setDismissedAttentionIds] = useState<Set<string>>(() => {
     try {
       const stored = window.localStorage.getItem('wmt.dashboard.dismissedAttention');
@@ -430,18 +428,13 @@ export default function Dashboard() {
     return Array.from(new Set(hosts)).slice(0, 8);
   }, [data?.recent_activities, remoteJobs, updateJobs]);
 
-  const submitHostLookup = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    navigateToHost(hostQuery);
-  };
-
   return (
     <div className="flex h-screen bg-background">
       <Sidebar user={user.username} permissions={user.permissions} onLogout={handleLogout} />
 
       <main className="min-w-0 flex-1 overflow-auto">
         <div className="mx-auto flex w-full max-w-7xl flex-col gap-5 p-6 lg:p-8">
-          <section className="surface-hero overflow-hidden p-5">
+          <section className="surface-hero relative z-30 overflow-visible p-5">
             <div className="flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
               <div className="min-w-0">
                 <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -464,20 +457,7 @@ export default function Dashboard() {
                 </p>
               </div>
 
-              <form onSubmit={submitHostLookup} className="grid w-full gap-2 sm:grid-cols-[minmax(0,1fr)_auto] xl:max-w-xl">
-                <div className="relative min-w-0">
-                  <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                  <Input
-                    value={hostQuery}
-                    onChange={(event) => setHostQuery(event.target.value.toUpperCase())}
-                    placeholder="Pesquisar workstation, WKS ou IP"
-                    className="min-w-0 pl-9"
-                  />
-                </div>
-                <Button type="submit" className="min-w-32">
-                  Pesquisar
-                </Button>
-              </form>
+              <UniversalSearch />
             </div>
           </section>
 

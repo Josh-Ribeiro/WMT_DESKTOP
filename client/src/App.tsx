@@ -21,6 +21,7 @@ const NotFound = lazy(() => import("./pages/NotFound"));
 const RemoteJobs = lazy(() => import("./pages/RemoteJobs"));
 const HostPerformance = lazy(() => import("./pages/HostPerformance"));
 const Terms = lazy(() => import("./pages/Terms"));
+const MachineReplacement = lazy(() => import("./pages/MachineReplacement"));
 
 
 function Router() {
@@ -33,6 +34,7 @@ function Router() {
       <Route path={"/tasks"} component={RemoteJobs} />
       <Route path={"/monitor-temps"} component={HostPerformance} />
       <Route path={"/backup"} component={Backup} />
+      <Route path={"/machine-replacement"} component={MachineReplacement} />
 
       <Route path={"/history"} component={WorkstationHistory} />
       <Route path={"/terms"} component={Terms} />

@@ -893,10 +893,10 @@ try {
     $searcher = New-Object DirectoryServices.DirectorySearcher
     $searcher.PageSize = 100
     $searcher.SizeLimit = [Math]::Max($Limit + 1, 2)
-    $searcher.Filter = "(&(objectCategory=person)(objectClass=user)(|(sAMAccountName=*$safe*)(userPrincipalName=*$safe*)(mail=*$safe*)(displayName=*$safe*)(cn=*$safe*)))"
+    $searcher.Filter = "(&(objectCategory=person)(objectClass=user)(|(sAMAccountName=*$safe*)(userPrincipalName=*$safe*)(mail=*$safe*)(displayName=*$safe*)(employeeID=*$safe*)(cn=*$safe*)))"
     @(
         "displayName","mail","userPrincipalName","sAMAccountName","userAccountControl","lockoutTime",
-        "department","title","company","physicalDeliveryOfficeName","lastLogonTimestamp","distinguishedName"
+        "employeeID","department","title","company","physicalDeliveryOfficeName","lastLogonTimestamp","distinguishedName"
     ) | ForEach-Object { $searcher.PropertiesToLoad.Add($_) | Out-Null }
     $results = @($searcher.FindAll())
     $matches = @()
@@ -913,6 +913,7 @@ try {
             display_name = FirstText $props.displayname
             email = FirstText $props.mail
             upn = FirstText $props.userprincipalname
+            employee_id = FirstText $props.employeeid
             title = FirstText $props.title
             department = FirstText $props.department
             company = FirstText $props.company
@@ -974,6 +975,7 @@ catch {
                 "display_name": text_value(item.get("display_name")),
                 "email": text_value(item.get("email")),
                 "upn": text_value(item.get("upn")),
+                "employee_id": text_value(item.get("employee_id")),
                 "title": text_value(item.get("title")),
                 "department": text_value(item.get("department")),
                 "company": text_value(item.get("company")),
@@ -1522,6 +1524,11 @@ class ADUserLookupRequest(BaseModel):
     query: str = Field(min_length=2)
 
 
+class UniversalSearchRequest(BaseModel):
+    query: str = Field(min_length=2, max_length=120)
+    limit: int = Field(default=8, ge=1, le=20)
+
+
 class LookupResponse(BaseModel):
     device_type: str = "workstation"
     online: bool
@@ -1629,7 +1636,7 @@ class BackupCreateRequest(BaseModel):
 
 
 class BackupPrecheckRequest(BackupCreateRequest):
-    pass
+    quick: bool = False
 
 
 class BackupCustomFolderRequest(BaseModel):
@@ -1654,6 +1661,22 @@ class BackupRetryFolderRequest(BaseModel):
 class BackupRetentionRequest(BaseModel):
     days: int = Field(default=30, ge=1, le=3650)
     keep_last: int = Field(default=20, ge=0, le=500)
+
+
+class MachineReplacementReportRequest(BaseModel):
+    source: str = Field(min_length=1, max_length=120)
+    destination: str = Field(min_length=1, max_length=120)
+    employee_name: str = Field(default="", max_length=200)
+    technician: str = Field(default="", max_length=200)
+    profiles: list[str] = Field(default_factory=list, max_length=200)
+    precheck_status: str = Field(default="", max_length=40)
+    precheck_message: str = Field(default="", max_length=500)
+    backup_job_id: str = Field(default="", max_length=100)
+    backup_status: str = Field(default="", max_length=40)
+    backup_summary: str = Field(default="", max_length=2000)
+    validation_status: str = Field(default="", max_length=80)
+    term_generated: bool = False
+    applications: list[dict[str, str]] = Field(default_factory=list, max_length=1000)
 
 
 class TermsGenerateRequest(BaseModel):
@@ -3332,6 +3355,193 @@ def convert_docx_to_pdf(docx_bytes: bytes, filename_stem: str) -> bytes:
         return pdf_path.read_bytes()
 
 
+def convert_html_to_pdf(html: str, filename_stem: str) -> bytes:
+    with tempfile.TemporaryDirectory(prefix="wmt_report_") as temp_dir:
+        temp_path = Path(temp_dir)
+        html_path = temp_path / f"{filename_stem}.html"
+        pdf_path = temp_path / f"{filename_stem}.pdf"
+        html_path.write_text(html, encoding="utf-8")
+        script = (
+            "$ErrorActionPreference = 'Stop'; "
+            f"$source = {json.dumps(str(html_path))}; "
+            f"$pdf = {json.dumps(str(pdf_path))}; "
+            "$word = $null; $doc = $null; "
+            "try { "
+            "$word = New-Object -ComObject Word.Application; "
+            "$word.Visible = $false; $word.DisplayAlerts = 0; "
+            "$doc = $word.Documents.Open($source, $false, $true); "
+            "$doc.ExportAsFixedFormat($pdf, 17); "
+            "} finally { "
+            "if ($doc -ne $null) { $doc.Close($false) | Out-Null }; "
+            "if ($word -ne $null) { $word.Quit() | Out-Null }; "
+            "[GC]::Collect(); [GC]::WaitForPendingFinalizers(); "
+            "} "
+        )
+        executable = powershell_executable()
+        if executable is None:
+            raise HTTPException(status_code=500, detail="PowerShell not found. Cannot generate PDF report.")
+        result = subprocess.run(
+            [executable, "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=90,
+        )
+        if result.returncode != 0 or not pdf_path.exists():
+            detail = (result.stderr or result.stdout or "").strip()
+            raise HTTPException(status_code=500, detail=detail or "Microsoft Word could not generate the PDF report.")
+        return pdf_path.read_bytes()
+
+
+def simple_text_pdf(title: str, sections: list[tuple[str, list[str]]]) -> bytes:
+    lines: list[tuple[str, int]] = [(title, 18)]
+    for heading, values in sections:
+        lines.append(("", 10))
+        lines.append((heading, 13))
+        for value in values:
+            wrapped = textwrap.wrap(str(value or ""), width=92, break_long_words=False, break_on_hyphens=False) or [""]
+            lines.extend((item, 9) for item in wrapped)
+
+    pages: list[list[tuple[str, int]]] = []
+    current: list[tuple[str, int]] = []
+    used_height = 0
+    for line, size in lines:
+        line_height = max(13, size + 4)
+        if current and used_height + line_height > 720:
+            pages.append(current)
+            current = []
+            used_height = 0
+        current.append((line, size))
+        used_height += line_height
+    if current:
+        pages.append(current)
+
+    def pdf_text(value: str) -> bytes:
+        encoded = value.encode("cp1252", errors="replace")
+        return encoded.replace(b"\\", b"\\\\").replace(b"(", b"\\(").replace(b")", b"\\)")
+
+    objects: dict[int, bytes] = {}
+    page_ids: list[int] = []
+    objects[3] = b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>"
+    for index, page_lines in enumerate(pages):
+        page_id = 4 + index * 2
+        content_id = page_id + 1
+        page_ids.append(page_id)
+        stream = bytearray(b"BT\n")
+        y = 800
+        for line, size in page_lines:
+            y -= max(13, size + 4)
+            stream.extend(f"/F1 {size} Tf 50 {y} Td (".encode("ascii"))
+            stream.extend(pdf_text(line))
+            stream.extend(b") Tj\n")
+            stream.extend(f"-50 {-y} Td\n".encode("ascii"))
+        stream.extend(b"ET")
+        objects[content_id] = b"<< /Length " + str(len(stream)).encode("ascii") + b" >>\nstream\n" + bytes(stream) + b"\nendstream"
+        objects[page_id] = (
+            f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] "
+            f"/Resources << /Font << /F1 3 0 R >> >> /Contents {content_id} 0 R >>"
+        ).encode("ascii")
+    objects[2] = f"<< /Type /Pages /Kids [{' '.join(f'{item} 0 R' for item in page_ids)}] /Count {len(page_ids)} >>".encode("ascii")
+    objects[1] = b"<< /Type /Catalog /Pages 2 0 R >>"
+
+    output = bytearray(b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n")
+    offsets = [0]
+    for object_id in range(1, max(objects) + 1):
+        offsets.append(len(output))
+        output.extend(f"{object_id} 0 obj\n".encode("ascii"))
+        output.extend(objects[object_id])
+        output.extend(b"\nendobj\n")
+    xref_offset = len(output)
+    output.extend(f"xref\n0 {len(offsets)}\n".encode("ascii"))
+    output.extend(b"0000000000 65535 f \n")
+    for offset in offsets[1:]:
+        output.extend(f"{offset:010d} 00000 n \n".encode("ascii"))
+    output.extend(f"trailer\n<< /Size {len(offsets)} /Root 1 0 R >>\nstartxref\n{xref_offset}\n%%EOF".encode("ascii"))
+    return bytes(output)
+
+
+def fallback_term_pdf(payload: dict, employee_name: str) -> bytes:
+    return simple_text_pdf(
+        "TERMO DE RESPONSABILIDADE DE EQUIPAMENTO",
+        [
+            ("COLABORADOR", [employee_name or payload.get("Employee Name") or "Nao informado"]),
+            (
+                "EQUIPAMENTO",
+                [
+                    f"Hostname: {payload.get('WKS') or payload.get('Hostname') or 'Nao informado'}",
+                    f"Fabricante: {payload.get('Brand') or 'Nao informado'}",
+                    f"Modelo: {payload.get('Model') or 'Nao informado'}",
+                    f"Numero de serie: {payload.get('SerialNumber') or 'Nao informado'}",
+                ],
+            ),
+            (
+                "RESPONSABILIDADE",
+                [
+                    "Declaro o recebimento do equipamento descrito acima em condicoes de uso.",
+                    "Comprometo-me a utilizar o equipamento exclusivamente para atividades profissionais, zelar por sua conservacao e comunicar imediatamente qualquer perda, dano ou incidente.",
+                    "A devolucao devera ocorrer quando solicitada pela empresa ou no encerramento da relacao de trabalho.",
+                ],
+            ),
+            ("ASSINATURAS", ["Colaborador: ______________________________________", "Data: ____/____/________", "Responsavel TI: ___________________________________"]),
+        ],
+    )
+
+
+def machine_replacement_report_html(request: MachineReplacementReportRequest) -> str:
+    applications = request.applications[:1000]
+    app_rows = "".join(
+        "<tr>"
+        f"<td>{escape(str(item.get('name') or ''))}</td>"
+        f"<td>{escape(str(item.get('source_version') or 'Nao instalado'))}</td>"
+        f"<td>{escape(str(item.get('destination_version') or 'Nao instalado'))}</td>"
+        f"<td>{escape(str(item.get('action') or 'Verificar'))}</td>"
+        "</tr>"
+        for item in applications
+    )
+    if not app_rows:
+        app_rows = '<tr><td colspan="4">Nenhuma diferenca de software identificada.</td></tr>'
+    profiles = ", ".join(escape(item) for item in request.profiles) or "Nenhum perfil informado"
+    generated_at = datetime.datetime.now().strftime("%d/%m/%Y %H:%M")
+    return f"""<!doctype html>
+<html><head><meta charset="utf-8"><style>
+@page {{ size: A4; margin: 18mm; }}
+body {{ font-family: Arial, sans-serif; color: #20242a; font-size: 10pt; }}
+h1 {{ color: #1d4ed8; font-size: 23pt; margin: 0 0 4px; }}
+h2 {{ color: #1f2937; font-size: 13pt; margin: 22px 0 8px; border-bottom: 2px solid #dbeafe; padding-bottom: 5px; }}
+.subtitle {{ color: #6b7280; margin-bottom: 20px; }}
+.grid {{ width: 100%; border-collapse: separate; border-spacing: 8px; margin-left: -8px; }}
+.grid td {{ width: 50%; background: #f5f7fa; border: 1px solid #dfe3e8; padding: 10px; }}
+.label {{ color: #6b7280; font-size: 8pt; text-transform: uppercase; }}
+.value {{ font-weight: bold; margin-top: 3px; }}
+table.apps {{ width: 100%; border-collapse: collapse; font-size: 8.5pt; }}
+.apps th {{ background: #1d4ed8; color: white; text-align: left; padding: 7px; }}
+.apps td {{ border: 1px solid #dfe3e8; padding: 7px; vertical-align: top; }}
+.status {{ display: inline-block; padding: 4px 9px; border: 1px solid #86efac; background: #f0fdf4; color: #166534; font-weight: bold; }}
+.footer {{ margin-top: 28px; color: #6b7280; font-size: 8pt; }}
+</style></head><body>
+<h1>Relatorio de troca de maquina</h1>
+<div class="subtitle">WMT - Gerado em {generated_at}</div>
+<table class="grid"><tr>
+<td><div class="label">Colaborador</div><div class="value">{escape(request.employee_name or "Nao informado")}</div></td>
+<td><div class="label">Tecnico responsavel</div><div class="value">{escape(request.technician or "Nao informado")}</div></td>
+</tr><tr>
+<td><div class="label">Equipamento de origem</div><div class="value">{escape(request.source)}</div></td>
+<td><div class="label">Equipamento de destino</div><div class="value">{escape(request.destination)}</div></td>
+</tr></table>
+<h2>Migracao de dados</h2>
+<p><b>Perfis selecionados:</b> {profiles}</p>
+<p><b>Pre-check:</b> {escape(request.precheck_status or "Nao executado")} - {escape(request.precheck_message)}</p>
+<p><b>Job:</b> {escape(request.backup_job_id or "Nao informado")} <span class="status">{escape(request.backup_status or "Sem status")}</span></p>
+<p><b>Resultado:</b> {escape(request.backup_summary or "Sem resumo retornado")}</p>
+<p><b>Validacao final:</b> {escape(request.validation_status or "Pendente")}</p>
+<p><b>Termo:</b> {"Gerado" if request.term_generated else "Nao gerado"}</p>
+<h2>Aplicativos que exigem atencao no destino</h2>
+<table class="apps"><thead><tr><th>Aplicativo</th><th>Origem</th><th>Destino</th><th>Acao</th></tr></thead><tbody>{app_rows}</tbody></table>
+<div class="footer">Relatorio produzido automaticamente pelo WMT com base nas informacoes coletadas durante a migracao.</div>
+</body></html>"""
+
+
 def fill_docx_template(template_path: Path, replacements: dict[str, str]) -> tuple[bytes, list[str]]:
     if not template_path.exists():
         raise HTTPException(status_code=500, detail=f"Template not found or inaccessible: {template_path}")
@@ -3806,6 +4016,9 @@ def lookup_machine(request: LookupRequest, user: dict = Depends(current_user)):
                 "current_user": current,
                 "ip_address": str(result.get("ip_address") or ""),
                 "os": str(result.get("os") or ""),
+                "serial_number": str(result.get("serial_number") or ""),
+                "manufacturer": str(result.get("manufacturer") or ""),
+                "model": str(result.get("model") or ""),
             },
         )
     return LookupResponse(**result)
@@ -3829,6 +4042,92 @@ def search_ad_users(request: ADUserLookupRequest, user: dict = Depends(current_u
     result = cached_ad_user_matches(query)
     audit("ad_user.search", user["username"], {"query": query, "total": result.get("total", 0)})
     return result
+
+
+def _universal_workstation_matches(query: str, limit: int) -> list[dict]:
+    needle = query.strip().lower()
+    if not needle:
+        return []
+
+    state = load_state_fields("audit", "backup_jobs", "remote_jobs", "update_jobs")
+    candidates: dict[str, dict] = {}
+
+    def remember(host_value: object, payload: dict | None = None, timestamp: object = "") -> None:
+        host = str(host_value or "").strip().upper()
+        if not host:
+            return
+        details = payload if isinstance(payload, dict) else {}
+        searchable = " ".join(
+            str(details.get(key) or "")
+            for key in ("host", "ip_address", "serial_number", "asset_number", "patrimony", "manufacturer", "model", "current_user")
+        ).lower()
+        if needle not in host.lower() and needle not in searchable:
+            return
+        existing = candidates.get(host)
+        candidate = {
+            "host": host,
+            "ip_address": text_value(details.get("ip_address")),
+            "serial_number": text_value(details.get("serial_number")),
+            "manufacturer": text_value(details.get("manufacturer")),
+            "model": text_value(details.get("model")),
+            "current_user": text_value(details.get("current_user")),
+            "last_seen": text_value(timestamp),
+            "known": True,
+        }
+        if existing is None or str(candidate["last_seen"]) > str(existing.get("last_seen") or ""):
+            candidates[host] = candidate
+
+    for item in state.get("audit") or []:
+        details = item.get("details") or {}
+        if not isinstance(details, dict):
+            continue
+        for host in _audit_hosts(details):
+            remember(host, details, item.get("timestamp"))
+
+    for collection in ("backup_jobs", "remote_jobs", "update_jobs"):
+        for item in state.get(collection) or []:
+            if not isinstance(item, dict):
+                continue
+            timestamp = item.get("created_at") or item.get("start_time") or item.get("ended_at") or ""
+            for key in ("host", "source", "destination", "workstation"):
+                remember(item.get(key), item, timestamp)
+
+    host_like = bool(
+        re.fullmatch(r"(?:[A-Za-z][A-Za-z0-9_.-]*\d[A-Za-z0-9_.-]*|\d{1,3}(?:\.\d{1,3}){3})", query.strip())
+    )
+    exact_host = query.strip().upper()
+    if host_like and exact_host not in candidates:
+        candidates[exact_host] = {
+            "host": exact_host,
+            "ip_address": exact_host if re.fullmatch(r"\d{1,3}(?:\.\d{1,3}){3}", exact_host) else "",
+            "serial_number": "",
+            "manufacturer": "",
+            "model": "",
+            "current_user": "",
+            "last_seen": "",
+            "known": False,
+        }
+
+    return sorted(
+        candidates.values(),
+        key=lambda item: (item["host"].lower() != needle, not item["known"], item["host"]),
+    )[:limit]
+
+
+@app.post("/api/search/universal")
+def universal_search(request: UniversalSearchRequest, user: dict = Depends(current_user)):
+    query = request.query.strip()
+    user_result = cached_ad_user_matches(query)
+    users = (user_result.get("matches") or [])[: request.limit]
+    workstations = _universal_workstation_matches(query, request.limit)
+    return {
+        "query": query,
+        "users": users,
+        "workstations": workstations,
+        "user_total": int(user_result.get("total") or len(users)),
+        "workstation_total": len(workstations),
+        "user_error": text_value(user_result.get("error")),
+    }
 
 
 def build_workstation_history(host: str) -> dict:
@@ -4076,17 +4375,27 @@ def terms_generate(request: TermsGenerateRequest, user: dict = Depends(require_r
 
 
 @app.post("/api/terms/print")
-def terms_print(request: TermsGenerateRequest, user: dict = Depends(require_role("admin", "operator"))):
+def terms_print(
+    request: TermsGenerateRequest,
+    portable: bool = Query(default=False),
+    user: dict = Depends(require_role("admin", "operator")),
+):
     term_entry = TERM_TYPES.get(request.term_type)
     if not term_entry:
         raise HTTPException(status_code=400, detail="Unsupported term type")
 
     payload = build_terms_payload(request.wk, request.employee_name)
-    template_path = terms_template_path(request.term_type)
-    docx_bytes, _missing_placeholders = fill_docx_template(template_path, term_replacements(payload))
     filename_wk = re.sub(r"[^A-Z0-9_-]+", "_", str(payload.get("WKS") or "WKS").upper())
     filename = f"{filename_wk}-{term_entry['filename_suffix']}.pdf"
-    pdf_bytes = convert_docx_to_pdf(docx_bytes, filename_wk)
+    if portable:
+        pdf_bytes = fallback_term_pdf(payload, request.employee_name)
+    else:
+        template_path = terms_template_path(request.term_type)
+        docx_bytes, _missing_placeholders = fill_docx_template(template_path, term_replacements(payload))
+        try:
+            pdf_bytes = convert_docx_to_pdf(docx_bytes, filename_wk)
+        except HTTPException:
+            pdf_bytes = fallback_term_pdf(payload, request.employee_name)
     audit(
         "terms.print",
         user["username"],
@@ -4095,6 +4404,74 @@ def terms_print(request: TermsGenerateRequest, user: dict = Depends(require_role
             "term_type": request.term_type,
             "employee_name": request.employee_name,
             "filename": filename,
+        },
+    )
+    return Response(
+        pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{filename}"'},
+    )
+
+
+@app.post("/api/machine-replacement/report")
+def machine_replacement_report(
+    request: MachineReplacementReportRequest,
+    user: dict = Depends(require_role("admin", "operator")),
+):
+    source = validate_backup_host(request.source)
+    destination = validate_backup_host(request.destination)
+    filename = f"troca-{source}-{destination}.pdf"
+    application_sections = [
+        (
+            f"{index}. {item.get('name') or 'Aplicativo'}",
+            [
+                f"Versao na origem: {item.get('source_version') or 'Nao instalado'}",
+                f"Versao no destino: {item.get('destination_version') or 'Nao instalado'}",
+                f"Acao recomendada: {item.get('action') or 'Verificar'}",
+                "-" * 72,
+            ],
+        )
+        for index, item in enumerate(request.applications[:1000], start=1)
+    ]
+    if not application_sections:
+        application_sections = [("APLICATIVOS", ["Nenhum aplicativo exige instalacao ou atualizacao."])]
+    pdf_bytes = simple_text_pdf(
+        "RELATORIO DE TROCA DE MAQUINA",
+        [
+            (
+                "IDENTIFICACAO",
+                [
+                    f"Colaborador: {request.employee_name or 'Nao informado'}",
+                    f"Tecnico: {request.technician or user['username']}",
+                    f"Origem: {source}",
+                    f"Destino: {destination}",
+                    f"Gerado em: {datetime.datetime.now().strftime('%d/%m/%Y %H:%M')}",
+                ],
+            ),
+            ("DADOS MIGRADOS", [f"Perfis: {', '.join(request.profiles) or 'Nenhum perfil informado'}"]),
+            (
+                "VALIDACOES E BACKUP",
+                [
+                    f"Pre-check: {request.precheck_status or 'Nao executado'} - {request.precheck_message}",
+                    f"Job: {request.backup_job_id or 'Nao informado'}",
+                    f"Status: {request.backup_status or 'Nao informado'}",
+                    f"Resumo: {request.backup_summary or 'Sem resumo retornado'}",
+                    f"Validacao final: {request.validation_status or 'Pendente'}",
+                    f"Termo: {'Gerado' if request.term_generated else 'Nao gerado'}",
+                ],
+            ),
+            ("APLICATIVOS PARA INSTALAR OU ATUALIZAR", [f"Total identificado: {len(request.applications)}"]),
+            *application_sections,
+        ],
+    )
+    audit(
+        "machine_replacement.report",
+        user["username"],
+        {
+            "source": source,
+            "destination": destination,
+            "backup_job_id": request.backup_job_id,
+            "applications": len(request.applications),
         },
     )
     return Response(
@@ -5435,6 +5812,74 @@ def backup_precheck(request: BackupPrecheckRequest, user: dict = Depends(require
         elif status == "warning":
             warnings.append(message)
 
+    if request.quick:
+        def ping_target(host: str) -> tuple[bool, str]:
+            try:
+                result = subprocess.run(["ping", "-n", "1", "-w", "900", host], capture_output=True, text=True, timeout=3)
+                return result.returncode == 0, host
+            except Exception as exc:
+                return False, str(exc)
+
+        def prepare_destination() -> tuple[bool, str]:
+            try:
+                if destination_root:
+                    _ensure_remote_directory(destination, destination_drive, destination_relative)
+                    return True, f"{destination_drive}:\\{destination_relative} is available"
+                return True, f"Default destination C:\\Users selected on {destination}"
+            except Exception as exc:
+                return False, str(exc)
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+            source_ping_future = executor.submit(ping_target, source)
+            destination_ping_future = executor.submit(ping_target, destination)
+            destination_space_future = executor.submit(_remote_drive_free_bytes, destination, destination_drive)
+            destination_access_future = executor.submit(prepare_destination)
+
+            source_online, source_detail = source_ping_future.result()
+            destination_online, destination_detail = destination_ping_future.result()
+            add_check("Source online", "ok" if source_online else "blocked", f"{source} responded" if source_online else f"{source} did not respond: {source_detail}")
+            add_check("Destination online", "ok" if destination_online else "blocked", f"{destination} responded" if destination_online else f"{destination} did not respond: {destination_detail}")
+            add_check("Selected profiles", "ok", f"{len(selected_users)} profile(s) already selected in the previous step")
+
+            try:
+                free_bytes = destination_space_future.result()
+                add_check("Destination free space", "ok", f"Free on {destination_drive}: {_format_bytes(free_bytes)}")
+            except Exception as exc:
+                add_check("Destination free space", "blocked", f"Could not query free space on {destination_drive}: {exc}")
+
+            destination_access, destination_access_detail = destination_access_future.result()
+            add_check(
+                "Destination access",
+                "ok" if destination_access else "blocked",
+                destination_access_detail if destination_access else f"Could not prepare destination: {destination_access_detail}",
+            )
+
+        status = "blocked" if errors else "warning" if warnings else "ok"
+        audit(
+            "backup.precheck",
+            user["username"],
+            {
+                "source": source,
+                "destination": destination,
+                "users": selected_users,
+                "destination_path": destination_path or "",
+                "status": status,
+                "quick": True,
+                "credential_user": access_identity,
+                "smb_user": smb_username,
+            },
+        )
+        return {
+            "status": status,
+            "checks": checks,
+            "warnings": warnings,
+            "errors": errors,
+            "estimated_bytes": 0,
+            "estimated_size": "Quick validation",
+            "message": "Quick pre-check blocked the migration." if status == "blocked" else "Quick pre-check completed.",
+            "quick": True,
+        }
+
     try:
         source_ping = subprocess.run(["ping", "-n", "1", "-w", "1200", source], capture_output=True, text=True, timeout=4)
         add_check("Source online", "ok" if source_ping.returncode == 0 else "blocked", f"{source} {'responded' if source_ping.returncode == 0 else 'did not respond'}")
@@ -5492,34 +5937,42 @@ def backup_precheck(request: BackupPrecheckRequest, user: dict = Depends(require
                 f"Missing profiles: {', '.join(missing_profiles)}" if missing_profiles else f"{len(selected_users)} selected profile(s) found",
             )
 
-            connect_source = _connect_share(source, source_share, smb_username, smb_password)
-            if not connect_source["success"]:
-                add_check("Source folders", "warning", f"Could not reconnect to source for size estimate: {connect_source['stderr'] or connect_source['stdout']}")
+            if request.quick:
+                add_check("Source folders", "ok", "Selected profiles are reachable (quick validation)")
+                add_check("Size estimate", "warning", "Deep folder size scan skipped in quick mode")
                 estimate_incomplete = True
                 source_folders_checked = True
             else:
-                try:
-                    for profile in selected_users:
-                        for folder in BACKUP_FOLDERS:
-                            path = _build_source_path(source, profile, folder, source_share)
-                            if not _unc_path_exists(path):
-                                missing_folders.append(f"{profile}/{folder}")
-                                continue
-                            try:
-                                folder_size, timed_out = _unc_folder_size_bytes(path, timeout_seconds=20)
-                                estimated_bytes += folder_size
-                                estimate_incomplete = estimate_incomplete or timed_out
-                            except Exception:
-                                estimate_incomplete = True
-                finally:
-                    _disconnect_share(source, source_share)
+                connect_source = _connect_share(source, source_share, smb_username, smb_password)
+                if not connect_source["success"]:
+                    add_check("Source folders", "warning", f"Could not reconnect to source for size estimate: {connect_source['stderr'] or connect_source['stdout']}")
+                    estimate_incomplete = True
+                    source_folders_checked = True
+                else:
+                    try:
+                        for profile in selected_users:
+                            for folder in BACKUP_FOLDERS:
+                                path = _build_source_path(source, profile, folder, source_share)
+                                if not _unc_path_exists(path):
+                                    missing_folders.append(f"{profile}/{folder}")
+                                    continue
+                                try:
+                                    folder_size, timed_out = _unc_folder_size_bytes(path, timeout_seconds=20)
+                                    estimated_bytes += folder_size
+                                    estimate_incomplete = estimate_incomplete or timed_out
+                                except Exception:
+                                    estimate_incomplete = True
+                    finally:
+                        _disconnect_share(source, source_share)
 
             if not source_folders_checked:
                 if missing_folders:
                     add_check("Source folders", "warning", f"Missing or inaccessible folders: {', '.join(missing_folders[:8])}")
                 else:
                     add_check("Source folders", "ok", "All selected profile folders are reachable")
-            if estimate_incomplete:
+            if request.quick:
+                pass
+            elif estimate_incomplete:
                 add_check("Size estimate", "warning", f"Estimated at least {_format_bytes(estimated_bytes)}; some folders could not be fully measured")
             else:
                 add_check("Size estimate", "ok", f"Estimated source data: {_format_bytes(estimated_bytes)}")
@@ -5546,6 +5999,7 @@ def backup_precheck(request: BackupPrecheckRequest, user: dict = Depends(require
                 "users": selected_users,
                 "destination_path": destination_path or "",
                 "status": status,
+                "quick": request.quick,
                 "credential_user": access_identity,
                 "smb_user": smb_username,
             },
@@ -5557,6 +6011,7 @@ def backup_precheck(request: BackupPrecheckRequest, user: dict = Depends(require
             "errors": errors,
             "estimated_bytes": estimated_bytes,
             "estimated_size": _format_bytes(estimated_bytes),
+            "quick": request.quick,
             "message": "Pre-check blocked the backup." if status == "blocked" else "Pre-check completed with warnings." if status == "warning" else "Pre-check passed.",
         }
     finally:

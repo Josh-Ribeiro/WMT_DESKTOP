@@ -10,12 +10,12 @@ import {
   HardDrive,
   FileText,
   Users,
-  UserRoundSearch,
   Settings,
   LogOut,
   ChevronLeft,
   ChevronRight,
   MonitorCog,
+  ArrowRightLeft,
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -33,9 +33,9 @@ export function Sidebar({ user = 'User', permissions = [], onLogout }: SidebarPr
   const menuItems = [
     { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, permission: 'dashboard' },
     { href: '/monitor', label: 'Monitor', icon: Activity, permission: 'monitor' },
-    { href: '/ad-users', label: 'AD Users', icon: UserRoundSearch, permission: 'monitor' },
     { href: '/tasks', label: 'Tasks', icon: ListChecks, permission: 'tasks' },
     { href: '/backup', label: 'Backup', icon: HardDrive, permission: 'backup' },
+    { href: '/machine-replacement', label: 'Troca de máquina', icon: ArrowRightLeft, permission: 'backup' },
     { href: '/history', label: 'WK History', icon: History, permission: 'monitor' },
     { href: '/terms', label: 'Terms', icon: FileText, permission: 'terms' },
     { href: '/admin/users', label: 'Users', icon: Users, permission: 'users' },
