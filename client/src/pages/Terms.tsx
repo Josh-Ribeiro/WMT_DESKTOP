@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react';
-import { renderAsync } from 'docx-preview';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -99,16 +98,17 @@ export default function Terms() {
     styleContainer.innerHTML = '';
     setPreviewRendering(true);
 
-    renderAsync(printPreview.blob, container, styleContainer, {
-      className: 'wmt-docx-preview',
-      ignoreFonts: false,
-      ignoreHeight: false,
-      ignoreWidth: false,
-      inWrapper: true,
-      renderFooters: true,
-      renderHeaders: true,
-      useBase64URL: true,
-    })
+    import('docx-preview')
+      .then(({ renderAsync }) => renderAsync(printPreview.blob, container, styleContainer, {
+        className: 'wmt-docx-preview',
+        ignoreFonts: false,
+        ignoreHeight: false,
+        ignoreWidth: false,
+        inWrapper: true,
+        renderFooters: true,
+        renderHeaders: true,
+        useBase64URL: true,
+      }))
       .then(() => {
         if (cancelled) {
           return;

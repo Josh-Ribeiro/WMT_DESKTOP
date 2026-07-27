@@ -690,7 +690,7 @@ export default function ADUsers() {
                 </p>
               </div>
 
-              <UniversalSearch initialValue={lastQuery} />
+              <UniversalSearch initialValue={lastQuery} onUserSelect={(value) => void searchUsers(value)} />
             </div>
           </section>
 

@@ -53,13 +53,24 @@ fn start_backend() {
         return;
     }
 
-    let child = Command::new("python")
+    let mut backend_command = Command::new("python");
+    backend_command
         .arg(backend_main)
         .current_dir(backend_dir)
-        .stdin(Stdio::null())
+        .stdin(Stdio::null());
+
+    #[cfg(debug_assertions)]
+    backend_command
+        .env("WMT_DEV", "1")
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit());
+
+    #[cfg(not(debug_assertions))]
+    backend_command
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn();
+        .stderr(Stdio::null());
+
+    let child = backend_command.spawn();
 
     match child {
         Ok(process) => {

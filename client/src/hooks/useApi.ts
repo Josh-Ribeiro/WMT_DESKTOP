@@ -73,6 +73,7 @@ export function useApi<T>(
     if (options.refetchInterval) {
       let timeoutId: ReturnType<typeof setTimeout> | undefined;
       const scheduleRefresh = () => {
+        if (timeoutId) clearTimeout(timeoutId);
         timeoutId = setTimeout(refresh, options.refetchInterval);
       };
       const refresh = async () => {
@@ -86,7 +87,8 @@ export function useApi<T>(
       scheduleRefresh();
       const handleVisibility = () => {
         if (!document.hidden) {
-          void fetchData(true);
+          if (timeoutId) clearTimeout(timeoutId);
+          void fetchData(true).finally(scheduleRefresh);
         }
       };
       document.addEventListener('visibilitychange', handleVisibility);

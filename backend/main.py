@@ -5,6 +5,7 @@ Runs on localhost:8000
 """
 
 import sys
+import os
 from pathlib import Path
 
 # Add app directory to path
@@ -17,10 +18,11 @@ if __name__ == "__main__":
     
     # Run FastAPI server
     # Accessible only from localhost for security
+    development = os.getenv("WMT_DEV", "").strip().lower() in {"1", "true", "yes"}
     uvicorn.run(
         "app.main:app",
         host="0.0.0.0",
         port=8000,
-        reload=False,
+        reload=development,
         log_level="info"
     )

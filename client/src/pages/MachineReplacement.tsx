@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { renderAsync } from 'docx-preview';
 import { ArrowLeft, ArrowRight, CheckCircle2, Clock3, Download, FileText, GitCompare, Loader2, MonitorCheck, Play, Printer, RefreshCw, Users } from 'lucide-react';
 import { useLocation } from 'wouter';
 import { toast } from 'sonner';
@@ -364,16 +363,17 @@ export default function MachineReplacement() {
     container.innerHTML = '';
     styleContainer.innerHTML = '';
     setTermPreviewRendering(true);
-    renderAsync(termDocument.blob, container, styleContainer, {
-      className: 'wmt-machine-term-preview',
-      ignoreFonts: false,
-      ignoreHeight: false,
-      ignoreWidth: false,
-      inWrapper: true,
-      renderFooters: true,
-      renderHeaders: true,
-      useBase64URL: true,
-    })
+    import('docx-preview')
+      .then(({ renderAsync }) => renderAsync(termDocument.blob, container, styleContainer, {
+        className: 'wmt-machine-term-preview',
+        ignoreFonts: false,
+        ignoreHeight: false,
+        ignoreWidth: false,
+        inWrapper: true,
+        renderFooters: true,
+        renderHeaders: true,
+        useBase64URL: true,
+      }))
       .then(() => {
         if (cancelled) return;
         container.contentEditable = 'true';

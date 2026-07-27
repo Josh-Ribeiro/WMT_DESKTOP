@@ -1,10 +1,13 @@
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Sidebar } from '@/components/Sidebar';
 import { UniversalSearch } from '@/components/UniversalSearch';
 import { useAuth } from '@/hooks/useAuth';
 import { useLocation } from 'wouter';
-import { Activity, CheckCircle2, ClipboardList, Clock3, Copy, Gauge, HardDrive, Loader2, PackageSearch, Play, Printer, RefreshCw, Search, Sparkles, Wrench } from 'lucide-react';
+import { Activity, CheckCircle2, ClipboardList, Clock3, Copy, Gauge, HardDrive, Loader2, PackageSearch, Play, Printer, RefreshCw, Search, ShieldAlert, Sparkles, Wrench } from 'lucide-react';
 
 import { useEffect, useRef, useState } from 'react';
 import { apiRequest } from '@/lib/api';
@@ -173,6 +176,7 @@ const quickActions = [
 type QuickAction = (typeof quickActions)[number];
 
 const SOFTWARE_CENTER_POLL_INTERVAL_MS = 10000;
+const LAST_MONITOR_HOST_KEY = 'wmt_monitor_last_host';
 const localRemoteToolActions = new Set(['remote-access', 'remote-assistance', 'computer-management']);
 const lookupLoadingMessages = [
   'Checking network reachability...',
@@ -207,6 +211,37 @@ function formatTicketDate(value?: string) {
   }).format(parsed);
 }
 
+function formatLastBoot(value?: string) {
+  if (!value) return '';
+
+  // WMI/CIM datetime: yyyyMMddHHmmss.ffffff+/-UUU
+  const wmiMatch = value.trim().match(
+    /^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})\.\d{6}([+-])(\d{3})$/,
+  );
+  let parsed: Date;
+
+  if (wmiMatch) {
+    const [, year, month, day, hour, minute, second, offsetSign, offsetValue] = wmiMatch;
+    const offsetMinutes = Number(offsetValue) * (offsetSign === '+' ? 1 : -1);
+    const utcTimestamp =
+      Date.UTC(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute), Number(second)) -
+      offsetMinutes * 60_000;
+    parsed = new Date(utcTimestamp);
+  } else {
+    parsed = new Date(value);
+  }
+
+  if (Number.isNaN(parsed.getTime())) return value;
+  return new Intl.DateTimeFormat('pt-BR', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  }).format(parsed);
+}
+
 function formatHistoryEvent(event: HistoryEvent) {
   const when = formatTicketDate(event.timestamp);
   const status = event.status ? ` [${event.status}]` : '';
@@ -230,7 +265,7 @@ function buildTicketSummary({
 }) {
   const osInfo = diagnostic?.inventory?.os || {};
   const uptimeHours = osInfo.uptime_hours;
-  const uptime = uptimeHours ? `${String(uptimeHours)}h` : result.last_boot ? `Last boot: ${result.last_boot}` : 'N/A';
+  const uptime = uptimeHours ? `${String(uptimeHours)}h` : result.last_boot ? `Last boot: ${formatLastBoot(result.last_boot)}` : 'N/A';
   const recentActions = historyEvents.slice(0, 5).map(formatHistoryEvent);
 
   return [
@@ -336,6 +371,23 @@ function canonicalRemoteAction(action: string) {
   };
 
   return aliases[normalized] || normalized.replace(/\s+/g, '-');
+}
+
+interface MaintenanceModeStatus {
+  host: string;
+  active: boolean;
+  flag_exists: boolean;
+  cleanup_required: boolean;
+  technician: string;
+  contact: string;
+  ticket: string;
+  reason: string;
+  expires_at: string;
+  protected_users: string[];
+  logon_blocked: boolean;
+  remote_logon_blocked: boolean;
+  lock_screen_applied: boolean;
+  mode: string;
 }
 
 async function openPathWithRetry(path: string, attempts = 12) {
@@ -825,7 +877,7 @@ function DiagnosticPanel({
 export default function Monitor() {
   const { user, logout, loading: authLoading } = useAuth();
   const [location, navigate] = useLocation();
-  const [lookupHost, setLookupHost] = useState('');
+  const [lookupHost, setLookupHost] = useState(() => localStorage.getItem(LAST_MONITOR_HOST_KEY) || '');
   const [lookupResult, setLookupResult] = useState<LookupResult | null>(null);
   const [lookupLoading, setLookupLoading] = useState(false);
   const [lookupLoadingStep, setLookupLoadingStep] = useState(0);
@@ -836,6 +888,13 @@ export default function Monitor() {
   const [remoteActionMessage, setRemoteActionMessage] = useState<string | null>(null);
   const [remoteActionDetails, setRemoteActionDetails] = useState<string | null>(null);
   const [remoteActionError, setRemoteActionError] = useState<string | null>(null);
+  const [maintenanceStatus, setMaintenanceStatus] = useState<MaintenanceModeStatus | null>(null);
+  const [maintenanceLoading, setMaintenanceLoading] = useState(false);
+  const [maintenanceDialogOpen, setMaintenanceDialogOpen] = useState(false);
+  const [maintenanceContact, setMaintenanceContact] = useState('Service Desk');
+  const [maintenanceTicket, setMaintenanceTicket] = useState('');
+  const [maintenanceReason, setMaintenanceReason] = useState('');
+  const [maintenanceDuration, setMaintenanceDuration] = useState(60);
   const [softwareCenter, setSoftwareCenter] = useState<SoftwareCenterStatus | null>(null);
   const [softwareCenterLoading, setSoftwareCenterLoading] = useState(false);
   const [softwareCenterInstalling, setSoftwareCenterInstalling] = useState(false);
@@ -862,6 +921,50 @@ export default function Monitor() {
 
   const selectedHost = lookupResult?.hostname || lookupHost.trim() || 'localhost';
   const canRunHostActions = user?.role === 'admin' || user?.role === 'operator';
+
+  const loadMaintenanceStatus = async (host: string) => {
+    try {
+      const status = await apiRequest<MaintenanceModeStatus>(`/api/maintenance-mode?host=${encodeURIComponent(host)}`);
+      setMaintenanceStatus(status);
+      if (status.contact) setMaintenanceContact(status.contact);
+      if (status.ticket) setMaintenanceTicket(status.ticket);
+      if (status.reason) setMaintenanceReason(status.reason);
+      return status;
+    } catch {
+      setMaintenanceStatus(null);
+      return null;
+    }
+  };
+
+  const changeMaintenanceMode = async (action: 'enable' | 'disable') => {
+    setMaintenanceLoading(true);
+    try {
+      const status = await apiRequest<MaintenanceModeStatus>('/api/maintenance-mode', {
+        method: 'POST',
+        body: JSON.stringify({
+          host: selectedHost,
+          action,
+          contact: maintenanceContact.trim() || 'Service Desk',
+          ticket: maintenanceTicket.trim(),
+          reason: maintenanceReason.trim(),
+          duration_minutes: maintenanceDuration,
+          target_user: lookupResult?.current_user || '',
+        }),
+      });
+      setMaintenanceStatus(status);
+      setMaintenanceDialogOpen(false);
+      toast.success(action === 'enable' ? 'Modo manutenção ativado' : 'Modo manutenção removido', {
+        description: selectedHost,
+      });
+      void loadHostHistory(selectedHost);
+    } catch (err) {
+      toast.error(action === 'enable' ? 'Falha ao ativar o modo manutenção' : 'Falha ao remover o modo manutenção', {
+        description: err instanceof Error ? err.message : selectedHost,
+      });
+    } finally {
+      setMaintenanceLoading(false);
+    }
+  };
 
   useEffect(() => {
     if (!lookupLoading) {
@@ -1146,6 +1249,7 @@ export default function Monitor() {
     setRemoteActionError(null);
     setRemoteActionMessage(null);
     setRemoteActionDetails(null);
+    setMaintenanceStatus(null);
 
     try {
       if (localRemoteToolActions.has(canonicalAction)) {
@@ -1192,6 +1296,9 @@ export default function Monitor() {
       setRemoteActionError(err instanceof Error ? err.message : 'Erro desconhecido ao executar a ação.');
     } finally {
       setRemoteActionLoading(null);
+      if (selectedHost && selectedHost !== 'localhost') {
+        void loadMaintenanceStatus(selectedHost);
+      }
     }
   };
 
@@ -1204,6 +1311,11 @@ export default function Monitor() {
     }
 
     setLookupHost(normalizedHost);
+    localStorage.setItem(LAST_MONITOR_HOST_KEY, normalizedHost);
+    if (window.location.pathname === '/monitor') {
+      const nextUrl = `/monitor?host=${encodeURIComponent(normalizedHost)}`;
+      window.history.replaceState(window.history.state, '', nextUrl);
+    }
     setLookupLoading(true);
     setLookupError(null);
     setLookupResult(null);
@@ -1234,6 +1346,7 @@ export default function Monitor() {
         if (canRunHostActions) {
           void loadDiagnostic(host);
           void loadHostHistory(host);
+          void loadMaintenanceStatus(host);
         }
       }
     } catch (err) {
@@ -1249,7 +1362,9 @@ export default function Monitor() {
       return;
     }
 
-    const host = new URLSearchParams(window.location.search).get('host')?.trim().toUpperCase();
+    const queryHost = new URLSearchParams(window.location.search).get('host')?.trim().toUpperCase();
+    const storedHost = localStorage.getItem(LAST_MONITOR_HOST_KEY)?.trim().toUpperCase();
+    const host = queryHost || storedHost;
     if (!host || autoLookupHostRef.current === host) {
       return;
     }
@@ -1257,6 +1372,31 @@ export default function Monitor() {
     autoLookupHostRef.current = host;
     void runLookup(host);
   }, [authLoading, location, user]);
+
+  useEffect(() => {
+    if (!canRunHostActions) return;
+    const host = lookupResult?.hostname || lookupHost.trim();
+    if (!host || host === 'localhost') return;
+
+    const refreshMaintenance = () => {
+      if (!document.hidden) void loadMaintenanceStatus(host);
+    };
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') refreshMaintenance();
+    };
+
+    window.addEventListener('focus', refreshMaintenance);
+    document.addEventListener('visibilitychange', handleVisibility);
+    const intervalId = maintenanceStatus?.active
+      ? window.setInterval(refreshMaintenance, 15000)
+      : null;
+
+    return () => {
+      window.removeEventListener('focus', refreshMaintenance);
+      document.removeEventListener('visibilitychange', handleVisibility);
+      if (intervalId !== null) window.clearInterval(intervalId);
+    };
+  }, [canRunHostActions, lookupResult?.hostname, lookupHost, maintenanceStatus?.active]);
 
   if (authLoading) {
     return null;
@@ -1299,7 +1439,7 @@ export default function Monitor() {
                   Pesquise um usuário, WKS, IP, matrícula ou serial e alterne entre os resultados sem sair do fluxo.
                 </p>
               </div>
-              <UniversalSearch initialValue={lookupHost} />
+              <UniversalSearch initialValue={lookupHost} onWorkstationSelect={(host) => void runLookup(host)} />
             </div>
 
               {lookupLoading && (
@@ -1428,6 +1568,35 @@ export default function Monitor() {
                             activeUpdateJob={activeUpdateJob}
                             historyEvents={hostHistory?.events || []}
                           />
+                          {canRunHostActions && (
+                            <div className="flex flex-col items-end gap-1">
+                              <Button
+                                type="button"
+                                variant={maintenanceStatus?.active ? 'destructive' : 'default'}
+                                className="min-h-10"
+                                disabled={maintenanceLoading}
+                                onClick={() => {
+                                  if (maintenanceStatus?.active) {
+                                    void changeMaintenanceMode('disable');
+                                  } else {
+                                    setMaintenanceDialogOpen(true);
+                                  }
+                                }}
+                              >
+                                {maintenanceLoading ? <Loader2 size={16} className="mr-2 animate-spin" /> : <ShieldAlert size={16} className="mr-2" />}
+                                {maintenanceStatus?.active ? 'Remover manutenção' : 'Modo Manutenção'}
+                              </Button>
+                              {maintenanceStatus?.active && (
+                                <span className="text-[11px] text-muted-foreground">
+                                  {maintenanceStatus.cleanup_required
+                                    ? 'Limpeza pendente • clique em Remover manutenção'
+                                    : maintenanceStatus.lock_screen_applied && maintenanceStatus.logon_blocked && maintenanceStatus.remote_logon_blocked
+                                    ? `Lock screen ativa • ${maintenanceStatus.protected_users.length} usuário(s) bloqueado(s)`
+                                    : 'Proteção de manutenção não confirmada'}
+                                </span>
+                              )}
+                            </div>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -1459,7 +1628,7 @@ export default function Monitor() {
                       <div className="grid gap-3 sm:grid-cols-2">
                         <InfoTile label="IP Address" value={lookupResult.ip_address} copyable />
                         <InfoTile label="MAC Address" value={lookupResult.mac_address} copyable />
-                        <InfoTile label="Last Boot" value={lookupResult.last_boot} className="sm:col-span-2" />
+                        <InfoTile label="Last Boot" value={formatLastBoot(lookupResult.last_boot)} className="sm:col-span-2" />
                         <InfoTile
                           label="Organization Unit"
                           value={lookupResult.active_directory?.organizational_unit}
@@ -1548,6 +1717,83 @@ export default function Monitor() {
                     />
                   )}
                 </div>
+
+                <Dialog open={maintenanceDialogOpen} onOpenChange={setMaintenanceDialogOpen}>
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>Ativar modo manutenção</DialogTitle>
+                      <DialogDescription>
+                        O WMT aplicará uma lock screen de manutenção no Windows e bloqueará o login dos colaboradores identificados. O usuário administrativo que ativar o modo continuará disponível para o suporte via RDP.
+                      </DialogDescription>
+                    </DialogHeader>
+                    <div className="grid gap-4 py-2">
+                      <div className="grid gap-2">
+                        <Label>Técnico responsável</Label>
+                        <Input value={user.display_name || user.username} disabled />
+                      </div>
+                      <div className="grid gap-2">
+                        <Label htmlFor="maintenance-ticket">Chamado</Label>
+                        <Input
+                          id="maintenance-ticket"
+                          value={maintenanceTicket}
+                          maxLength={100}
+                          placeholder="Ex.: INC0012345"
+                          onChange={(event) => setMaintenanceTicket(event.target.value)}
+                        />
+                      </div>
+                      <div className="grid gap-2">
+                        <Label htmlFor="maintenance-reason">Motivo da manutenção</Label>
+                        <Textarea
+                          id="maintenance-reason"
+                          value={maintenanceReason}
+                          maxLength={500}
+                          placeholder="Descreva resumidamente o atendimento"
+                          onChange={(event) => setMaintenanceReason(event.target.value)}
+                        />
+                      </div>
+                      <div className="grid gap-2">
+                        <Label htmlFor="maintenance-contact">Ramal ou contato</Label>
+                        <Input
+                          id="maintenance-contact"
+                          value={maintenanceContact}
+                          maxLength={200}
+                          placeholder="Ex.: Ramal 1234 ou Service Desk"
+                          onChange={(event) => setMaintenanceContact(event.target.value)}
+                        />
+                      </div>
+                      <div className="grid gap-2">
+                        <Label htmlFor="maintenance-duration">Duração máxima</Label>
+                        <select
+                          id="maintenance-duration"
+                          value={maintenanceDuration}
+                          className="h-10 rounded-md border border-input bg-background px-3 text-sm"
+                          onChange={(event) => setMaintenanceDuration(Number(event.target.value))}
+                        >
+                          <option value={30}>30 minutos</option>
+                          <option value={60}>1 hora</option>
+                          <option value={120}>2 horas</option>
+                          <option value={240}>4 horas</option>
+                          <option value={480}>8 horas</option>
+                        </select>
+                      </div>
+                      <p className="text-xs leading-5 text-muted-foreground">
+                        Ao remover o modo, as tarefas e arquivos serão excluídos e as políticas de logon anteriores serão restauradas automaticamente.
+                      </p>
+                    </div>
+                    <DialogFooter>
+                      <Button variant="outline" disabled={maintenanceLoading} onClick={() => setMaintenanceDialogOpen(false)}>
+                        Cancelar
+                      </Button>
+                      <Button
+                        disabled={maintenanceLoading || !maintenanceTicket.trim() || !maintenanceReason.trim()}
+                        onClick={() => void changeMaintenanceMode('enable')}
+                      >
+                        {maintenanceLoading && <Loader2 size={16} className="mr-2 animate-spin" />}
+                        Ativar
+                      </Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
 
                 <section className="space-y-4 border-t border-border/60 pt-5">
                   <div>

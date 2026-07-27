@@ -44,6 +44,8 @@ interface RecentSearch {
 }
 
 const RECENT_SEARCHES_KEY = 'wmt.universalSearch.recent';
+const searchCache = new Map<string, { timestamp: number; value: UniversalSearchResult }>();
+const SEARCH_CACHE_TTL_MS = 60_000;
 
 function readRecentSearches(): RecentSearch[] {
   try {
@@ -54,7 +56,17 @@ function readRecentSearches(): RecentSearch[] {
   }
 }
 
-export function UniversalSearch({ initialValue = '' }: { initialValue?: string }) {
+interface UniversalSearchProps {
+  initialValue?: string;
+  onUserSelect?: (query: string) => void;
+  onWorkstationSelect?: (host: string) => void;
+}
+
+export function UniversalSearch({
+  initialValue = '',
+  onUserSelect,
+  onWorkstationSelect,
+}: UniversalSearchProps) {
   const [, navigate] = useLocation();
   const [query, setQuery] = useState(initialValue);
   const [result, setResult] = useState<UniversalSearchResult | null>(null);
@@ -62,10 +74,14 @@ export function UniversalSearch({ initialValue = '' }: { initialValue?: string }
   const [loading, setLoading] = useState(false);
   const [focused, setFocused] = useState(false);
   const requestIdRef = useRef(0);
+  const previousInitialValueRef = useRef(initialValue);
 
   useEffect(() => {
-    if (!focused && initialValue && initialValue !== query) setQuery(initialValue);
-  }, [focused, initialValue, query]);
+    if (initialValue === previousInitialValueRef.current) return;
+    previousInitialValueRef.current = initialValue;
+    setQuery(initialValue);
+    setResult(null);
+  }, [initialValue]);
 
   const remember = (item: RecentSearch) => {
     const next = [item, ...recent.filter((entry) => !(entry.type === item.type && entry.value === item.value))].slice(0, 6);
@@ -76,32 +92,51 @@ export function UniversalSearch({ initialValue = '' }: { initialValue?: string }
   const openUser = (userQuery: string, label = userQuery, detail = '') => {
     remember({ type: 'user', label, value: userQuery, detail });
     setFocused(false);
-    navigate(`/ad-users?query=${encodeURIComponent(userQuery)}`);
+    if (onUserSelect) {
+      onUserSelect(userQuery);
+    } else {
+      navigate(`/ad-users?query=${encodeURIComponent(userQuery)}`);
+    }
   };
 
   const openWorkstation = (host: string, detail = '') => {
     const normalized = host.trim().toUpperCase();
     remember({ type: 'workstation', label: normalized, value: normalized, detail });
     setFocused(false);
-    navigate(`/monitor?host=${encodeURIComponent(normalized)}`);
+    if (onWorkstationSelect) {
+      onWorkstationSelect(normalized);
+    } else {
+      navigate(`/monitor?host=${encodeURIComponent(normalized)}`);
+    }
   };
 
   useEffect(() => {
     const clean = query.trim();
+    setResult(null);
     if (clean.length < 2) {
-      setResult(null);
       setLoading(false);
       return;
     }
 
     const requestId = ++requestIdRef.current;
     const timer = window.setTimeout(async () => {
+      const cacheKey = clean.toLocaleLowerCase();
+      const cached = searchCache.get(cacheKey);
+      if (cached && Date.now() - cached.timestamp < SEARCH_CACHE_TTL_MS) {
+        if (requestIdRef.current === requestId) {
+          setResult(cached.value);
+          setLoading(false);
+        }
+        return;
+      }
       setLoading(true);
       try {
         const payload = await apiRequest<UniversalSearchResult>('/api/search/universal', {
           method: 'POST',
           body: JSON.stringify({ query: clean, limit: 8 }),
         });
+        searchCache.set(cacheKey, { timestamp: Date.now(), value: payload });
+        if (searchCache.size > 40) searchCache.delete(searchCache.keys().next().value as string);
         if (requestIdRef.current === requestId) setResult(payload);
       } catch {
         if (requestIdRef.current === requestId) setResult(null);
@@ -136,8 +171,10 @@ export function UniversalSearch({ initialValue = '' }: { initialValue?: string }
       openUser(clean, clean, 'Pesquisa no Active Directory');
     } else if (exactWorkstation) {
       openWorkstation(exactWorkstation.host, exactWorkstation.current_user);
-    } else {
+    } else if (/^(?:[a-z][a-z0-9_.-]*\d[a-z0-9_.-]*|\d{1,3}(?:\.\d{1,3}){3})$/i.test(clean)) {
       openWorkstation(clean);
+    } else {
+      openUser(clean, clean, 'Pesquisa no Active Directory');
     }
   };
 

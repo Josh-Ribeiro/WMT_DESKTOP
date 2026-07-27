@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { check, type DownloadEvent, type Update } from "@tauri-apps/plugin-updater";
+import type { DownloadEvent, Update } from "@tauri-apps/plugin-updater";
 import { toast } from "sonner";
 
 function isTauriRuntime() {
@@ -49,7 +49,13 @@ async function installUpdate(update: Update) {
 
 function showUpdateToast(update: Update) {
   toast.info(`WMT ${update.version} is available`, {
-    description: update.body || `Current version: ${update.currentVersion}`,
+    description: update.body ? (
+      <div className="max-h-48 overflow-y-auto whitespace-pre-line pr-1">
+        {update.body}
+      </div>
+    ) : (
+      `Current version: ${update.currentVersion}`
+    ),
     duration: Infinity,
     action: {
       label: "Update now",
@@ -72,6 +78,7 @@ export default function UpdateNotifier() {
 
     const checkForUpdates = async () => {
       try {
+        const { check } = await import("@tauri-apps/plugin-updater");
         const update = await check({ timeout: 15000 });
         if (update) {
           showUpdateToast(update);

@@ -1,10 +1,12 @@
 {
   "name": "wmt-desktop",
-  "version": "1.0.112",
+  "version": "1.0.122",
   "type": "module",
   "license": "MIT",
   "scripts": {
     "dev": "vite --host",
+    "dev:web": "vite --host",
+    "dev:backend": "python -m uvicorn app.main:app --app-dir backend --host 0.0.0.0 --port 8000 --reload",
     "dev:tauri": "tauri dev",
     "build": "vite build",
     "build:tauri": "tauri build",

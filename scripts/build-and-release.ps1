@@ -18,6 +18,15 @@ Endpoint do updater. Se omitido, usa BackendUrl + /api/updates/latest.json
 .PARAMETER Channel
 Canal de release: prod usa latest.json; debug usa latest-debug.json e instala lado a lado
 
+.PARAMETER ReleaseNotes
+Mensagem exibida ao usuario quando a atualizacao estiver disponivel
+
+.PARAMETER ReleaseNotesFile
+Caminho de um arquivo TXT ou Markdown com as notas da atualizacao
+
+.PARAMETER SkipReleaseNotesPrompt
+Nao solicita notas interativamente; usa a mensagem padrao quando nenhuma nota for informada
+
 .EXAMPLE
 .\build-and-release.ps1 -Type "patch"
 .\build-and-release.ps1 -Type "minor"
@@ -30,6 +39,9 @@ param(
     [string]$UpdateEndpoint = "",
     [ValidateSet("prod", "debug")]
     [string]$Channel = "prod",
+    [string]$ReleaseNotes = "",
+    [string]$ReleaseNotesFile = "",
+    [switch]$SkipReleaseNotesPrompt,
     [switch]$SkipTest,
     [switch]$Help
 )
@@ -76,6 +88,9 @@ if ($Help) {
         "  -BackendUrl                URL do backend para o app empacotado",
         "  -UpdateEndpoint            URL do latest.json para auto-update",
         "  -Channel [prod|debug]      Canal do update; debug instala separado e usa latest-debug.json",
+        "  -ReleaseNotes              Texto exibido no aviso de atualizacao",
+        "  -ReleaseNotesFile          Arquivo TXT/Markdown com as notas da atualizacao",
+        "  -SkipReleaseNotesPrompt    Nao pergunta as notas durante o build",
         "  -SkipTest                  Pula testes locais do MSI",
         "  -Help                      Mostra esta ajuda",
         "",
@@ -83,6 +98,8 @@ if ($Help) {
         "  .\build-and-release.ps1 -Type patch",
         "  .\build-and-release.ps1 -Type minor",
         "  .\build-and-release.ps1",
+        "  .\build-and-release.ps1 -Type patch -ReleaseNotes ""Busca universal mais rapida e correcoes no monitor.""",
+        "  .\build-and-release.ps1 -Type patch -ReleaseNotesFile .\notas.md",
         "  .\build-and-release.ps1 -BackendUrl http://10.10.10.20:8000",
         "  .\build-and-release.ps1 -BackendUrl http://10.10.10.20:8000 -UpdateEndpoint http://10.10.10.20:8000/api/updates/latest.json",
         "  .\build-and-release.ps1 -Channel debug -BackendUrl http://10.10.10.20:8000"
@@ -220,6 +237,54 @@ if ($Type) {
 }
 else {
     Write-Info "VersÃ£o: $currentVersion (nÃ£o serÃ¡ alterada)"
+}
+
+$defaultReleaseNotes = if ($Channel -eq "debug") {
+    "WMT Desktop Debug $currentVersion"
+}
+else {
+    "WMT Desktop $currentVersion"
+}
+
+if ($ReleaseNotes -and $ReleaseNotesFile) {
+    throw "Use apenas -ReleaseNotes ou -ReleaseNotesFile, nao os dois ao mesmo tempo."
+}
+
+$effectiveReleaseNotes = ""
+if ($ReleaseNotesFile) {
+    $resolvedReleaseNotesFile = Resolve-Path $ReleaseNotesFile -ErrorAction Stop
+    $effectiveReleaseNotes = (Get-Content $resolvedReleaseNotesFile.Path -Raw).Trim()
+    Write-Success "Notas carregadas de: $($resolvedReleaseNotesFile.Path)"
+}
+elseif ($ReleaseNotes) {
+    $effectiveReleaseNotes = $ReleaseNotes.Trim()
+}
+elseif ($env:WMT_RELEASE_NOTES) {
+    $effectiveReleaseNotes = $env:WMT_RELEASE_NOTES.Trim()
+    Write-Info "Notas carregadas da variavel WMT_RELEASE_NOTES."
+}
+elseif (-not $SkipReleaseNotesPrompt) {
+    Write-Header "Notas da atualizacao"
+    Write-Info "Digite a mensagem que sera exibida no atualizador."
+    Write-Info "Use uma linha por item e pressione Enter em uma linha vazia para concluir."
+
+    $releaseNoteLines = [System.Collections.Generic.List[string]]::new()
+    while ($true) {
+        $releaseNoteLine = Read-Host "Nota"
+        if ([string]::IsNullOrWhiteSpace($releaseNoteLine)) {
+            break
+        }
+        $releaseNoteLines.Add($releaseNoteLine.Trim())
+    }
+    $effectiveReleaseNotes = ($releaseNoteLines -join [Environment]::NewLine).Trim()
+}
+
+if ([string]::IsNullOrWhiteSpace($effectiveReleaseNotes)) {
+    $effectiveReleaseNotes = $defaultReleaseNotes
+    Write-Info "Nenhuma nota informada; sera usada a mensagem padrao."
+}
+else {
+    Write-Success "Notas da atualizacao registradas."
 }
 
 if ($Channel -eq "debug" -or $EffectiveUpdateEndpoint) {
@@ -433,7 +498,7 @@ if ($EffectiveBackendUrl -and $sigPath -and (Test-Path $sigPath)) {
     $encodedMsiLeaf = [Uri]::EscapeDataString($msiLeaf)
     $updatePayload = [ordered]@{
         version = $currentVersion
-        notes = if ($Channel -eq "debug") { "WMT Desktop Debug $currentVersion" } else { "WMT Desktop $currentVersion" }
+        notes = $effectiveReleaseNotes
         pub_date = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
         platforms = [ordered]@{
             "windows-x86_64" = [ordered]@{
@@ -452,34 +517,19 @@ elseif ($EffectiveBackendUrl) {
     Write-Warning-Custom "Update nÃ£o publicado porque o arquivo .sig nÃ£o foi encontrado."
 }
 
-# Criar arquivo de release notes (template)
+# Criar arquivo de release notes
 $releaseNotesPath = "$releaseDir\RELEASE_NOTES.md"
-if (-not (Test-Path $releaseNotesPath)) {
-    @"
+@"
 # WMT Desktop v$currentVersion
 
 **Data:** $(Get-Date -Format "dd/MM/yyyy")
+**Canal:** $Channel
 
-## Novidades
-- [ ] Nova feature 1
-- [ ] Nova feature 2
+## Notas da atualizacao
 
-## Bugfixes
-- [ ] Corrigido bug X
-- [ ] Corrigido bug Y
-
-## Melhorias de Performance
-- [ ] OtimizaÃ§Ã£o X
-
-## Breaking Changes
-- Nenhum
-
-## Notas
-Adicione notas aqui...
-
+$effectiveReleaseNotes
 "@ | Out-File $releaseNotesPath
-    Write-Info "Template de RELEASE_NOTES.md criado"
-}
+Write-Success "RELEASE_NOTES.md criado com as notas informadas."
 
 # ============================================================================
 # PASSO 9: InstruÃ§Ãµes Finais

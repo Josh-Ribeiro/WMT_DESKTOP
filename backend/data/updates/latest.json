@@ -1,11 +1,11 @@
 {
-  "version": "1.0.103",
-  "notes": "WMT Desktop 1.0.103",
-  "pub_date": "2026-07-20T11:55:37Z",
+  "version": "1.0.122",
+  "notes": "Otimização e novo Modo de Manutenção no Monitor !\r\nAgora realizar atendimentos via RDP ficou mais facil e controlado.",
+  "pub_date": "2026-07-27T18:49:05Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSRk8yZFJEU1RUQ09BeE5BUFltWXpkclAwUldYVU1SMUJFWlpPaFo0ZVZYM3YzRXBtV1BZK3IyNmFnV1A3QlFmZW4xTnovTUxyVXB0VDdkNnlBYldtSDNRS3U3SktiZEFFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg0NTQ4NTM0CWZpbGU6V01UIERlc2t0b3BfMS4wLjEwM194NjRfZW4tVVMubXNpCk0zelNQQUdvTVdoL2l5L2hMc2ZkaVVkYUxFbXNMdWJEU2c2TkNyeEhFTHdpcUdjZHpYUDFCMGRLdUZNQW92WU1PVFo4YVFYQ3BLN3pJYklZQ1VnWUN3PT0K",
-      "url": "http://wks048-495br:8000/api/updates/WMT%20Desktop_1.0.103_x64_en-US.msi"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSRk8yZFJEU1RUQ0ZwSHpIWDFsSXNrWjc0SzU3cnZZanFkOEhIaG85ejNXaU5iZXVLRmFJUEpIQ0RsZDBwU2Y3OGVPcXl5VUdPVHdTZFg5WlhyRkVTNHoyM3N6ZDFPc2dFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg1MTc4MTQzCWZpbGU6V01UIERlc2t0b3BfMS4wLjEyMl94NjRfZW4tVVMubXNpCkE0b291ZWZodHFlUzEyYkNzT3ZnQWlseEdBWUJmdi9xM3YwNnYyaEZCcmlYVTNXYSt6VkU4djBsNjhYR01wQjEwbGpyb1dnL0ZhcVg4UGQvOWVyakFBPT0K",
+      "url": "http://wks048-495br:8000/api/updates/WMT%20Desktop_1.0.122_x64_en-US.msi"
     }
   }
 }

@@ -26,6 +26,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
+from starlette.middleware.gzip import GZipMiddleware
 
 app = FastAPI(title="WMT Desktop Backend")
 
@@ -59,6 +60,7 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["Content-Disposition", "X-Missing-Placeholders"],
 )
+app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=5)
 
 DATA_DIR = Path(__file__).resolve().parents[1] / "data"
 SCRIPT_DIR = Path(__file__).resolve().parents[1] / "scripts"
@@ -392,26 +394,26 @@ def script_enabled(script_key: str) -> bool:
     return bool(settings.get("scripts_enabled", {}).get(script_key, True))
 
 
-def friendly_error_message(raw_message: str, context: str = "operaÃ§Ã£o") -> str:
+def friendly_error_message(raw_message: str, context: str = "operação") -> str:
     text = (raw_message or "").strip()
     lowered = text.lower()
     if not text:
-        return f"NÃ£o foi possÃ­vel concluir a {context}."
+        return f"Não foi possível concluir a {context}."
 
     if any(item in lowered for item in ["access is denied", "access denied", "acesso negado", "system error 5", "unauthorizedaccess"]):
-        return f"Acesso negado ao executar {context}. Verifique se a conta do backend tem permissÃ£o administrativa no host de destino."
+        return f"Acesso negado ao executar {context}. Verifique se a conta do backend tem permissão administrativa no host de destino."
     if any(item in lowered for item in ["winrm", "wsman", "cannot connect to the destination", "the client cannot connect", "access is denied. for more information, see the about_remote_troubleshooting"]):
-        return f"WinRM/PowerShell Remoting indisponÃ­vel para {context}. Confirme se o host estÃ¡ online, com WinRM habilitado e liberado no firewall."
+        return f"WinRM/PowerShell Remoting indisponível para {context}. Confirme se o host está online, com WinRM habilitado e liberado no firewall."
     if any(item in lowered for item in ["no such host", "could not resolve", "host not found", "ping request could not find host"]):
-        return f"Host nÃ£o encontrado para {context}. Confira o nome da WKS ou DNS."
-    if any(item in lowered for item in ["network path was not found", "the network path was not found", "0x80070035", "nÃ£o foi encontrado o caminho da rede"]):
-        return f"Host offline ou compartilhamento administrativo inacessÃ­vel para {context}. Verifique rede, firewall e admin share."
+        return f"Host não encontrado para {context}. Confira o nome da WKS ou DNS."
+    if any(item in lowered for item in ["network path was not found", "the network path was not found", "0x80070035", "não foi encontrado o caminho da rede", "nÃ£o foi encontrado o caminho da rede"]):
+        return f"Host offline ou compartilhamento administrativo inacessível para {context}. Verifique rede, firewall e admin share."
     if any(item in lowered for item in ["sms_client", "root\\ccm", "invalid namespace", "ccmexec", "ccm_softwareupdate"]):
-        return f"SCCM Client nÃ£o foi encontrado ou nÃ£o respondeu no host durante {context}. Verifique se o cliente SCCM estÃ¡ instalado e saudÃ¡vel."
-    if any(item in lowered for item in ["logon failure", "unknown user name or bad password", "falha de logon", "usuÃ¡rio ou senha incorretos"]):
-        return f"Credencial sem permissÃ£o ou invÃ¡lida para {context}. Confira usuÃ¡rio, senha e privilÃ©gios locais no host."
+        return f"SCCM Client não foi encontrado ou não respondeu no host durante {context}. Verifique se o cliente SCCM está instalado e saudável."
+    if any(item in lowered for item in ["logon failure", "unknown user name or bad password", "falha de logon", "usuário ou senha incorretos", "usuÃ¡rio ou senha incorretos"]):
+        return f"Credencial sem permissão ou inválida para {context}. Confira usuário, senha e privilégios locais no host."
     if any(item in lowered for item in ["admin$", "c$", "multiple connections", "error 1219"]):
-        return f"Admin share bloqueado ou sessÃ£o SMB conflitante durante {context}. Feche conexÃµes antigas e confirme acesso ao C$/ADMIN$."
+        return f"Admin share bloqueado ou sessão SMB conflitante durante {context}. Feche conexões antigas e confirme acesso ao C$/ADMIN$."
     return text
 
 
@@ -1052,7 +1054,7 @@ def logged_user_from_host(host: str) -> str:
 
     executable = powershell_executable()
     if executable is None:
-        raise HTTPException(status_code=401, detail="PowerShell nao encontrado para consultar usuÃ¡rio remoto")
+        raise HTTPException(status_code=401, detail="PowerShell não encontrado para consultar usuário remoto")
 
     script = (
         "$ErrorActionPreference='Stop'; "
@@ -1073,7 +1075,7 @@ def logged_user_from_host(host: str) -> str:
         detail = (result.stderr or result.stdout or "").strip()
         raise HTTPException(
             status_code=401,
-            detail=f"NÃ£o foi possÃ­vel detectar usuÃ¡rio logado no cliente {target}. {friendly_error_message(detail, 'consulta do usuÃ¡rio logado')}",
+            detail=f"Não foi possível detectar usuário logado no cliente {target}. {friendly_error_message(detail, 'consulta do usuário logado')}",
         )
     return logged_user
 
@@ -1555,6 +1557,16 @@ class RemoteActionRequest(BaseModel):
     action: str
 
 
+class MaintenanceModeRequest(BaseModel):
+    host: str
+    action: Literal["enable", "disable"]
+    contact: str = Field(default="Service Desk", max_length=200)
+    ticket: str = Field(default="", max_length=100)
+    reason: str = Field(default="", max_length=500)
+    duration_minutes: int = Field(default=60, ge=5, le=1440)
+    target_user: str = Field(default="", max_length=200)
+
+
 class HostRequest(BaseModel):
     host: str
 
@@ -1826,7 +1838,7 @@ def run_software_center_script(host: str, action: str) -> dict:
             "pendingUpdates": 0,
             "updates": [],
             "ok": False,
-            "message": "Scripts do Software Center estÃ£o desabilitados nas configuraÃ§Ãµes do WMT.",
+            "message": "Scripts do Software Center estão desabilitados nas configurações do WMT.",
         }
 
     timeout = int(current_settings().get("software_center_timeout_seconds") or 180)
@@ -1880,7 +1892,7 @@ def run_software_center_script(host: str, action: str) -> dict:
 
 def execute_remote_action(host: str, requested_action: str, job_id: str | None = None) -> tuple[bool, str, str]:
     if not script_enabled("remote_actions"):
-        return False, "AÃ§Ãµes remotas estÃ£o desabilitadas nas configuraÃ§Ãµes do WMT.", ""
+        return False, "Ações remotas estão desabilitadas nas configurações do WMT.", ""
 
     normalized = _canonical_remote_action(requested_action)
 
@@ -1898,10 +1910,10 @@ def execute_remote_action(host: str, requested_action: str, job_id: str | None =
         result = run_powershell_script(script_name, host, script_action, timeout=75, job_id=job_id)
     except subprocess.TimeoutExpired as exc:
         details = "\n".join(item for item in [exc.stdout or "", exc.stderr or ""] if item).strip()
-        return False, f"AÃ§Ã£o '{requested_action}' excedeu o tempo limite em {host}.", details
+        return False, f"Ação '{requested_action}' excedeu o tempo limite em {host}.", details
     except Exception as exc:
         details = str(exc)
-        return False, friendly_error_message(details, f"aÃ§Ã£o remota '{requested_action}' em {host}"), details
+        return False, friendly_error_message(details, f"ação remota '{requested_action}' em {host}"), details
 
     stdout = (result.stdout or "").strip()
     stderr = (result.stderr or "").strip()
@@ -2192,7 +2204,7 @@ def create_update_job(host: str, username: str) -> dict:
         "host": host,
         "status": "queued",
         "ok": False,
-        "message": "Update adicionado Ã  fila.",
+        "message": "Update adicionado à fila.",
         "details": "",
         "created_by": username,
         "created_at": utc_now(),
@@ -6032,7 +6044,7 @@ def backup_precheck(request: BackupPrecheckRequest, user: dict = Depends(require
 @app.post("/api/backup/jobs")
 def create_backup_job(request: BackupCreateRequest, user: dict = Depends(require_role("admin", "operator"))):
     if not script_enabled("backup"):
-        raise HTTPException(status_code=403, detail="Backups estÃ£o desabilitados nas configuraÃ§Ãµes do WMT.")
+        raise HTTPException(status_code=403, detail="Backups estão desabilitados nas configurações do WMT.")
     access_identity = _require_windows_backup_identity(user)
     smb_username, smb_password = _resolve_backup_smb_credentials(request.remote_user, request.remote_pass)
     source = validate_backup_host(request.source)
@@ -6682,3 +6694,98 @@ def remote_actions(request: RemoteActionRequest, user: dict = Depends(require_ro
         "open_path": job.get("open_path") or "",
         "timestamp": job["created_at"],
     }
+
+
+def run_maintenance_mode(
+    host: str,
+    action: str,
+    technician: str = "",
+    technician_username: str = "",
+    contact: str = "",
+    ticket: str = "",
+    reason: str = "",
+    duration_minutes: int = 60,
+    target_user: str = "",
+) -> dict:
+    normalized_host = host.strip().upper()
+    if not normalized_host:
+        raise HTTPException(status_code=400, detail="Host is required")
+    executable = powershell_executable()
+    script_path = SCRIPT_DIR / "maintenance_mode.ps1"
+    if executable is None or not script_path.exists():
+        raise HTTPException(status_code=500, detail="Maintenance mode script is not available")
+    command = [
+        executable, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script_path),
+        "-HostName", normalized_host, "-Action", action,
+    ]
+    if technician:
+        command.extend(["-Technician", technician])
+    if technician_username:
+        command.extend(["-TechnicianUsername", technician_username])
+    if contact:
+        command.extend(["-Contact", contact])
+    if ticket:
+        command.extend(["-Ticket", ticket])
+    if reason:
+        command.extend(["-Reason", reason])
+    command.extend(["-DurationMinutes", str(duration_minutes)])
+    if target_user:
+        command.extend(["-TargetUser", target_user])
+    try:
+        result = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120)
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=504, detail=f"Maintenance mode operation timed out on {normalized_host}")
+    if result.returncode != 0:
+        detail = friendly_error_message((result.stderr or result.stdout or "").strip(), f"modo manutenção em {normalized_host}")
+        raise HTTPException(status_code=502, detail=detail)
+    try:
+        payload = json.loads(next(line for line in reversed(result.stdout.splitlines()) if line.strip()))
+    except Exception:
+        raise HTTPException(status_code=502, detail="Invalid maintenance mode response")
+    if not isinstance(payload.get("protected_users"), list):
+        payload["protected_users"] = []
+    return {"host": normalized_host, **payload}
+
+
+@app.get("/api/maintenance-mode")
+def maintenance_mode_status(host: str = Query(...), user: dict = Depends(current_user)):
+    return run_maintenance_mode(host, "status")
+
+
+@app.post("/api/maintenance-mode")
+def change_maintenance_mode(request: MaintenanceModeRequest, user: dict = Depends(require_role("admin", "operator"))):
+    technician = str(user.get("display_name") or user.get("username") or "Equipe de TI")
+    technician_username = str(user.get("username") or "")
+    contact = request.contact.strip() or "Service Desk"
+    ticket = request.ticket.strip()
+    reason = request.reason.strip()
+    if request.action == "enable" and not ticket:
+        raise HTTPException(status_code=400, detail="Informe o chamado da manutenção")
+    if request.action == "enable" and not reason:
+        raise HTTPException(status_code=400, detail="Informe o motivo da manutenção")
+    payload = run_maintenance_mode(
+        request.host,
+        request.action,
+        technician,
+        technician_username,
+        contact,
+        ticket,
+        reason,
+        request.duration_minutes,
+        request.target_user.strip(),
+    )
+    audit(
+        f"maintenance.{request.action}",
+        user["username"],
+        {
+            "host": payload["host"],
+            "technician": technician,
+            "contact": contact,
+            "ticket": ticket,
+            "reason": reason,
+            "duration_minutes": request.duration_minutes,
+            "protected_users": payload.get("protected_users", []),
+            "target_user": request.target_user.strip(),
+        },
+    )
+    return payload
