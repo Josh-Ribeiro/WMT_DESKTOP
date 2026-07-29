@@ -4,7 +4,7 @@ import datetime
 from fastapi import Depends, Header, HTTPException, Query, Request
 from fastapi import APIRouter
 
-from ..repositories.state import load_state_fields
+from ..repositories.state import list_audit_entries, load_state_fields
 from ..services.auth import current_user
 from ..services.backup import (
     BACKUP_JOBS,
@@ -67,7 +67,6 @@ def dashboard(user: dict = Depends(current_user)):
         "backup_jobs",
         "remote_jobs",
         "update_jobs",
-        "audit",
         "users",
         "temp_shares",
     )
@@ -104,14 +103,15 @@ def dashboard(user: dict = Depends(current_user)):
     finished_today = sum(1 for job in jobs if is_today(job.get("end_time") or job.get("start_time")))
     terms_today = sum(
         1
-        for item in state.get("audit", [])
-        if item.get("action") in {"terms.generate", "terms.print"} and is_today(item.get("timestamp"))
+        for item in list_audit_entries(actions={"terms.generate", "terms.print"})
+        if is_today(item.get("timestamp"))
     )
     active_users = sum(1 for item in state.get("users", []) if item.get("status") == "active")
 
-    audit_items = state.get("audit", [])
-    if not can_view_backup:
-        audit_items = [item for item in audit_items if not str(item.get("action") or "").startswith("backup.")]
+    audit_items = list_audit_entries(
+        limit=8,
+        exclude_action_prefix=None if can_view_backup else "backup.",
+    )
 
     recent = [
         {
@@ -121,7 +121,7 @@ def dashboard(user: dict = Depends(current_user)):
             "details": item.get("details", {}),
             "timestamp": item["timestamp"],
         }
-        for item in audit_items[:8]
+        for item in audit_items
     ]
 
     recent_jobs = [

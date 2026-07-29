@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import copy
 import json
-import secrets
 import sqlite3
 import threading
 from collections.abc import Callable
@@ -28,7 +27,7 @@ STATE_CACHE: dict | None = None
 STATE_CACHE_REVISION: int | None = None
 STATE_INITIALIZED_DB: str | None = None
 STATE_REVISION_KEY = "__wmt_state_revision"
-STATE_SCHEMA_VERSION = 2
+STATE_SCHEMA_VERSION = 3
 T = TypeVar("T")
 
 
@@ -68,9 +67,9 @@ def default_state() -> dict:
         "backup_jobs": [],
         "remote_jobs": [],
         "temp_shares": [],
+        "maintenance_modes": [],
         "update_jobs": [],
         "settings": copy.deepcopy(DEFAULT_SETTINGS),
-        "audit": [],
     }
 
 
@@ -95,8 +94,8 @@ def ensure_state_defaults(
         "backup_jobs": [],
         "remote_jobs": [],
         "temp_shares": [],
+        "maintenance_modes": [],
         "update_jobs": [],
-        "audit": [],
     }.items():
         state.setdefault(key, copy.deepcopy(value))
 
@@ -165,6 +164,57 @@ def _connect() -> sqlite3.Connection:
     return connection
 
 
+def _create_audit_schema(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS audit_log (
+            sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+            id TEXT NOT NULL UNIQUE,
+            action TEXT NOT NULL,
+            username TEXT NOT NULL,
+            details TEXT NOT NULL,
+            timestamp TEXT NOT NULL
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_audit_log_timestamp
+        ON audit_log (timestamp DESC, sequence DESC)
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_audit_log_action_timestamp
+        ON audit_log (action, timestamp DESC)
+        """
+    )
+
+
+def _insert_audit_entries(
+    connection: sqlite3.Connection,
+    entries: list[dict],
+) -> None:
+    connection.executemany(
+        """
+        INSERT OR IGNORE INTO audit_log
+            (id, action, username, details, timestamp)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        [
+            (
+                str(item.get("id") or uuid4().hex),
+                str(item.get("action") or ""),
+                str(item.get("username") or ""),
+                json.dumps(item.get("details") or {}, ensure_ascii=False),
+                str(item.get("timestamp") or utc_now()),
+            )
+            for item in entries
+            if isinstance(item, dict)
+        ],
+    )
+
+
 def _legacy_state() -> dict | None:
     if not STATE_FILE.is_file():
         return None
@@ -203,6 +253,7 @@ def _initialize_database_unlocked() -> None:
                 )
                 """
             )
+            _create_audit_schema(connection)
             row = connection.execute(
                 "SELECT revision, payload FROM state_snapshot WHERE id = 1"
             ).fetchone()
@@ -211,6 +262,8 @@ def _initialize_database_unlocked() -> None:
                 state = ensure_state_defaults(
                     legacy if legacy is not None else default_state()
                 )
+                legacy_audit = state.pop("audit", [])
+                _insert_audit_entries(connection, legacy_audit)
                 connection.execute(
                     """
                     INSERT INTO state_snapshot (id, revision, payload, updated_at)
@@ -238,6 +291,8 @@ def _initialize_database_unlocked() -> None:
             if stored_version < STATE_SCHEMA_VERSION:
                 stored = json.loads(row["payload"])
                 prepared = ensure_state_defaults(copy.deepcopy(stored))
+                legacy_audit = prepared.pop("audit", [])
+                _insert_audit_entries(connection, legacy_audit)
                 if prepared != stored:
                     connection.execute(
                         """
@@ -417,18 +472,74 @@ def script_enabled(script_key: str) -> bool:
     return bool(settings.get("scripts_enabled", {}).get(script_key, True))
 
 
-def audit(action: str, username: str, details: dict | None = None) -> None:
-    def append_audit(state: dict) -> None:
-        state.setdefault("audit", []).insert(
-            0,
-            {
-                "id": secrets.token_hex(8),
-                "action": action,
-                "username": username,
-                "details": details or {},
-                "timestamp": utc_now(),
-            },
-        )
-        state["audit"] = state["audit"][:1000]
+def list_audit_entries(
+    *,
+    limit: int | None = None,
+    actions: set[str] | None = None,
+    action_prefix: str | None = None,
+    exclude_action_prefix: str | None = None,
+) -> list[dict]:
+    """Return newest audit entries without imposing a repository-wide cap."""
+    with STATE_LOCK:
+        _initialize_database_unlocked()
+        clauses: list[str] = []
+        parameters: list[object] = []
+        if actions:
+            placeholders = ", ".join("?" for _item in actions)
+            clauses.append(f"action IN ({placeholders})")
+            parameters.extend(sorted(actions))
+        if action_prefix:
+            clauses.append("action LIKE ?")
+            parameters.append(f"{action_prefix}%")
+        if exclude_action_prefix:
+            clauses.append("action NOT LIKE ?")
+            parameters.append(f"{exclude_action_prefix}%")
 
-    mutate_state(append_audit)
+        query = "SELECT id, action, username, details, timestamp FROM audit_log"
+        if clauses:
+            query += " WHERE " + " AND ".join(clauses)
+        query += " ORDER BY timestamp DESC, sequence DESC"
+        if limit is not None:
+            query += " LIMIT ?"
+            parameters.append(max(0, int(limit)))
+
+        connection = _connect()
+        try:
+            rows = connection.execute(query, parameters).fetchall()
+        finally:
+            connection.close()
+
+    result: list[dict] = []
+    for row in rows:
+        try:
+            details = json.loads(row["details"])
+        except (TypeError, json.JSONDecodeError):
+            details = {}
+        result.append(
+            {
+                "id": row["id"],
+                "action": row["action"],
+                "username": row["username"],
+                "details": details if isinstance(details, dict) else {},
+                "timestamp": row["timestamp"],
+            }
+        )
+    return result
+
+
+def audit(action: str, username: str, details: dict | None = None) -> None:
+    entry = {
+        "id": uuid4().hex,
+        "action": action,
+        "username": username,
+        "details": details or {},
+        "timestamp": utc_now(),
+    }
+    with STATE_LOCK:
+        _initialize_database_unlocked()
+        connection = _connect()
+        try:
+            with connection:
+                _insert_audit_entries(connection, [entry])
+        finally:
+            connection.close()

@@ -5,7 +5,7 @@
   "platforms": {
     "windows-x86_64": {
       "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSRk8yZFJEU1RUQ0ZwSHpIWDFsSXNrWjc0SzU3cnZZanFkOEhIaG85ejNXaU5iZXVLRmFJUEpIQ0RsZDBwU2Y3OGVPcXl5VUdPVHdTZFg5WlhyRkVTNHoyM3N6ZDFPc2dFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg1MTc4MTQzCWZpbGU6V01UIERlc2t0b3BfMS4wLjEyMl94NjRfZW4tVVMubXNpCkE0b291ZWZodHFlUzEyYkNzT3ZnQWlseEdBWUJmdi9xM3YwNnYyaEZCcmlYVTNXYSt6VkU4djBsNjhYR01wQjEwbGpyb1dnL0ZhcVg4UGQvOWVyakFBPT0K",
-      "url": "https://WKS048-495BR/api/updates/WMT%20Desktop_1.0.122_x64_en-US.msi"
+      "url": "https://wmt.example.com/api/updates/WMT%20Desktop_1.0.122_x64_en-US.msi"
     }
   }
 }

@@ -39,6 +39,16 @@ from ..core.config import (
 from .powershell import (
     powershell_executable,
 )
+from .backup_paths import (
+    build_destination_base_path as _build_destination_base_path,
+    build_destination_path as _build_destination_path,
+    build_source_path as _build_source_path,
+    build_temporary_destination_browse_path as _build_temporary_destination_browse_path,
+    build_unc_from_absolute_path as _build_unc_from_absolute_path,
+    normalize_absolute_windows_path as _normalize_absolute_windows_path,
+    normalize_destination_root as _normalize_destination_root,
+    safe_robocopy_exclude_patterns as _safe_robocopy_exclude_patterns,
+)
 from ..core.security import (
     friendly_error_message,
     utc_now,
@@ -219,81 +229,6 @@ def _resolve_backup_smb_credentials(remote_user: str | None, remote_pass: str | 
     username = (remote_user or REMOTE_ADMIN_USER or "").strip()
     password = (remote_pass or REMOTE_ADMIN_PASS or "").strip()
     return username, password
-
-
-def _normalize_destination_root(destination_path: str | None) -> tuple[str, str] | None:
-    path = (destination_path or "").strip()
-    if not path:
-        return None
-    normalized = path.replace("/", "\\")
-    if not re.match(r"^[A-Za-z]:\\", normalized):
-        raise HTTPException(status_code=400, detail="Custom destination path must be absolute, like D:\\Backup\\Migration")
-    drive = normalized[0].upper()
-    relative = normalized[3:].strip("\\")
-    return drive, relative
-
-
-def _normalize_absolute_windows_path(path: str, field_name: str) -> tuple[str, str]:
-    normalized = str(path or "").strip().replace("/", "\\")
-    if not re.match(r"^[A-Za-z]:\\", normalized):
-        raise HTTPException(status_code=400, detail=f"{field_name} must be absolute, like D:\\Backup\\Folder")
-    return normalized[0].upper(), normalized[3:].strip("\\")
-
-
-def _build_unc_from_absolute_path(host: str, path: str, share_name: str | None = None) -> tuple[str, str, str]:
-    drive, relative = _normalize_absolute_windows_path(path, "Path")
-    share = share_name or drive
-    base = f"\\\\{host}\\{share}"
-    return drive, relative, f"{base}\\{relative}" if relative else base
-
-
-def _safe_robocopy_exclude_patterns(patterns: list[str]) -> list[str]:
-    safe: list[str] = []
-    for item in patterns:
-        pattern = str(item or "").strip()
-        if not pattern or any(char in pattern for char in ['"', "'", "\r", "\n"]):
-            continue
-        safe.append(pattern)
-    return safe[:25]
-
-
-def _build_source_path(host: str, user: str, folder: str, share_name: str = "C") -> str:
-    return f"\\\\{host}\\{share_name}\\Users\\{user}\\{folder}"
-
-
-def _build_destination_path(
-    host: str,
-    user: str,
-    folder: str,
-    destination_path: str | None,
-    share_name: str | None = None,
-) -> tuple[str, str]:
-    destination_root = _normalize_destination_root(destination_path)
-    if not destination_root:
-        share = share_name or "C"
-        return "C", f"\\\\{host}\\{share}\\Users\\{user}\\{folder}"
-
-    drive, relative = destination_root
-    base = f"\\\\{host}\\{share_name or drive}"
-    if relative:
-        base = f"{base}\\{relative}"
-    return drive, f"{base}\\{user}\\{folder}"
-
-
-def _build_destination_base_path(host: str, destination_path: str | None, share_name: str | None = None) -> str:
-    destination_root = _normalize_destination_root(destination_path)
-    if not destination_root:
-        return f"\\\\{host}\\{share_name or 'C'}\\Users"
-
-    drive, relative = destination_root
-    base = f"\\\\{host}\\{share_name or drive}"
-    return f"{base}\\{relative}" if relative else base
-
-
-def _build_temporary_destination_browse_path(host: str, drive: str, relative: str) -> str:
-    share_name = _temporary_share_name(drive)
-    base = f"\\\\{host}\\{share_name}"
-    return f"{base}\\{relative}" if relative else base
 
 
 def _powershell_single_quote(value: str) -> str:

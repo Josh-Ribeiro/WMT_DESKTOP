@@ -8,6 +8,7 @@ from ..core.config import BACKUP_TEMPORARY_SHARE_TTL_MINUTES
 from ..core.security import utc_now
 from ..repositories.state import (
     audit,
+    list_audit_entries,
     load_state,
     load_state_fields,
     mutate_state,
@@ -36,6 +37,11 @@ from ..services.remote_operations import (
     run_maintenance_mode,
     validate_remote_action_request,
 )
+from ..services.maintenance import (
+    build_maintenance_modes_payload,
+    track_maintenance_mode,
+    untrack_maintenance_mode,
+)
 from ..services.temp_shares import (
     _normalize_history_host,
     _temp_share_drive_from_name,
@@ -52,7 +58,7 @@ def list_remote_jobs(
     page_size: int = Query(default=50, ge=1, le=200),
     user: dict = Depends(current_user),
 ):
-    state = load_state_fields("remote_jobs", "temp_shares")
+    state = load_state_fields("remote_jobs", "temp_shares", "maintenance_modes")
     persisted_jobs = state.get("remote_jobs", [])
     with REMOTE_JOBS_LOCK:
         runtime_jobs = [_public_remote_job(job) for job in REMOTE_JOBS.values()]
@@ -81,6 +87,10 @@ def list_remote_jobs(
         "failed": failed,
         "completed": completed,
         "temp_shares": build_temp_shares_payload(state, verify_live=False),
+        "maintenance_modes": build_maintenance_modes_payload(
+            state,
+            list_audit_entries(action_prefix="maintenance."),
+        ),
     }
 
 
@@ -243,6 +253,18 @@ def change_maintenance_mode(request: MaintenanceModeRequest, user: dict = Depend
         request.duration_minutes,
         request.target_user.strip(),
     )
+    if request.action == "enable":
+        track_maintenance_mode(
+            payload,
+            opened_by=technician_username,
+            technician=technician,
+            contact=contact,
+            ticket=ticket,
+            reason=reason,
+            duration_minutes=request.duration_minutes,
+        )
+    elif request.action == "disable":
+        untrack_maintenance_mode(payload["host"])
     audit(
         f"maintenance.{request.action}",
         user["username"],

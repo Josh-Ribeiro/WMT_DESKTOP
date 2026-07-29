@@ -38,6 +38,7 @@ from ..core.security import (
     escape_ldap_filter_value,
 )
 from ..repositories.state import (
+    list_audit_entries,
     load_state_fields,
 )
 
@@ -562,8 +563,7 @@ def find_last_user_workstation(ad_user: dict) -> dict:
     if not candidates:
         return {}
 
-    state = load_state_fields("audit")
-    for item in state.get("audit") or []:
+    for item in list_audit_entries(actions={"workstation.lookup"}):
         if item.get("action") != "workstation.lookup":
             continue
         details = item.get("details") or {}

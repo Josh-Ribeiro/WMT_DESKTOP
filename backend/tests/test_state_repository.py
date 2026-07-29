@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -61,7 +62,7 @@ class SQLiteStateRepositoryTests(unittest.TestCase):
                     "start_time": "2026-05-28 10:00:00",
                     "size": "256 GB",
                 },
-                {"id": "REAL-1", "workstation": "WKS048-001BR"},
+                {"id": "REAL-1", "workstation": "WKS001"},
             ],
         }
         state_repository.STATE_FILE.write_text(
@@ -137,6 +138,74 @@ class SQLiteStateRepositoryTests(unittest.TestCase):
         self.assertEqual(
             "pt-BR",
             state_repository.load_state()["settings"]["display_language"],
+        )
+
+    def test_audit_uses_dedicated_table_without_thousand_entry_cap(self) -> None:
+        state_repository.load_state()
+        connection = sqlite3.connect(state_repository.STATE_DB_FILE)
+        try:
+            connection.executemany(
+                """
+                INSERT INTO audit_log (id, action, username, details, timestamp)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                [
+                    (
+                        f"audit-{index}",
+                        "test.event",
+                        "tester",
+                        json.dumps({"index": index}),
+                        f"2026-01-01T00:{index // 60:02d}:{index % 60:02d}Z",
+                    )
+                    for index in range(1005)
+                ],
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        entries = state_repository.list_audit_entries()
+
+        self.assertEqual(1005, len(entries))
+        self.assertNotIn("audit", state_repository.load_state())
+
+    def test_snapshot_audit_is_migrated_to_dedicated_table(self) -> None:
+        state_repository.load_state()
+        connection = sqlite3.connect(state_repository.STATE_DB_FILE)
+        try:
+            row = connection.execute(
+                "SELECT revision, payload FROM state_snapshot WHERE id = 1"
+            ).fetchone()
+            payload = json.loads(row[1])
+            payload["audit"] = [
+                {
+                    "id": "legacy-event",
+                    "action": "legacy.action",
+                    "username": "legacy-user",
+                    "details": {"host": "TEST-01"},
+                    "timestamp": "2026-01-01T00:00:00Z",
+                }
+            ]
+            connection.execute(
+                "UPDATE state_snapshot SET payload = ? WHERE id = 1",
+                (json.dumps(payload),),
+            )
+            connection.execute(
+                "UPDATE state_metadata SET value = '2' WHERE key = 'schema_version'"
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        state_repository.STATE_INITIALIZED_DB = None
+        state_repository.STATE_CACHE = None
+        state_repository.STATE_CACHE_REVISION = None
+        state = state_repository.load_state()
+
+        self.assertNotIn("audit", state)
+        self.assertEqual(
+            ["legacy-event"],
+            [item["id"] for item in state_repository.list_audit_entries()],
         )
 
 

@@ -3,6 +3,8 @@ from __future__ import annotations
 import unittest
 from unittest.mock import patch
 
+from backend.app.api.directory import _is_explicit_device_query, universal_search
+from backend.app.schemas import UniversalSearchRequest
 from backend.app.services.inventory import collect_machine_info
 from backend.app.services.history import _universal_workstation_matches
 from backend.app.services.snmp import (
@@ -12,6 +14,34 @@ from backend.app.services.snmp import (
 
 
 class PrinterNetworkClassificationTests(unittest.TestCase):
+    def test_wks_and_ip_queries_are_devices_before_ad_search(self) -> None:
+        self.assertTrue(_is_explicit_device_query("WKS048-123BR"))
+        self.assertTrue(_is_explicit_device_query("wks001"))
+        self.assertTrue(_is_explicit_device_query("10.131.200.42"))
+        self.assertTrue(_is_explicit_device_query("10.131.201.42"))
+        self.assertTrue(_is_explicit_device_query("192.168.1.20"))
+        self.assertFalse(_is_explicit_device_query("ribeiro.josue"))
+        self.assertFalse(_is_explicit_device_query("10.131.200.999"))
+
+    @patch(
+        "backend.app.api.directory._universal_workstation_matches",
+        return_value=[],
+    )
+    @patch("backend.app.api.directory.cached_ad_user_matches")
+    def test_explicit_device_search_does_not_query_ad(
+        self,
+        ad_search_mock,
+        _workstation_search_mock,
+    ) -> None:
+        for query in ("WKS048-123BR", "10.131.201.42", "10.131.200.42"):
+            result = universal_search(
+                UniversalSearchRequest(query=query, limit=8),
+                user={"username": "tester"},
+            )
+            self.assertEqual([], result["users"])
+
+        ad_search_mock.assert_not_called()
+
     def test_reserved_range_boundaries_are_printers(self) -> None:
         self.assertFalse(is_forced_printer_host("10.131.200.0"))
         self.assertTrue(is_forced_printer_host("10.131.200.1"))

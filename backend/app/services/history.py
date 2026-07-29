@@ -47,6 +47,7 @@ from ..core.security import (
     utc_now,
 )
 from ..repositories.state import (
+    list_audit_entries,
     load_state,
     load_state_fields,
 )
@@ -63,7 +64,8 @@ def _universal_workstation_matches(query: str, limit: int) -> list[dict]:
     if not needle:
         return []
 
-    state = load_state_fields("audit", "backup_jobs", "remote_jobs", "update_jobs")
+    state = load_state_fields("backup_jobs", "remote_jobs", "update_jobs")
+    audit_items = list_audit_entries()
     candidates: dict[str, dict] = {}
 
     def remember(host_value: object, payload: dict | None = None, timestamp: object = "") -> None:
@@ -98,7 +100,7 @@ def _universal_workstation_matches(query: str, limit: int) -> list[dict]:
         if existing is None or str(candidate["last_seen"]) > str(existing.get("last_seen") or ""):
             candidates[host] = candidate
 
-    for item in state.get("audit") or []:
+    for item in audit_items:
         details = item.get("details") or {}
         if not isinstance(details, dict):
             continue
@@ -143,6 +145,7 @@ def _universal_workstation_matches(query: str, limit: int) -> list[dict]:
 def build_workstation_history(host: str) -> dict:
     normalized_host = _normalize_history_host(host)
     state = load_state()
+    audit_log = list_audit_entries()
 
     with BACKUP_JOBS_LOCK:
         runtime_backup_jobs = [_public_backup_job(job) for job in BACKUP_JOBS.values()]
@@ -172,7 +175,7 @@ def build_workstation_history(host: str) -> dict:
 
     audit_items = [
         item
-        for item in state.get("audit", [])
+        for item in audit_log
         if normalized_host in _audit_hosts(item.get("details") or {})
     ]
     diagnostics = [

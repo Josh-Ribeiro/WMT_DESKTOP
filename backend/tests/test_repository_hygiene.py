@@ -56,6 +56,21 @@ class RepositoryHygieneTests(unittest.TestCase):
         self.assertIn('verify.ps1"', release_script)
         self.assertTrue((ROOT / ".github" / "workflows" / "verify.yml").is_file())
 
+    def test_production_release_rejects_missing_or_placeholder_backend(self) -> None:
+        release_script = (
+            ROOT / "scripts" / "build-and-release.ps1"
+        ).read_text(encoding="utf-8-sig")
+
+        self.assertIn(
+            'if ($Channel -eq "prod" -and $BackendMode -eq "central")',
+            release_script,
+        )
+        self.assertIn("Build de produção central exige -BackendUrl", release_script)
+        self.assertIn("Test-PlaceholderUrl $EffectiveBackendUrl", release_script)
+        self.assertIn("Test-PlaceholderUrl $EffectiveUpdateEndpoint", release_script)
+        self.assertIn('EndsWith(".example.com"', release_script)
+        self.assertIn("pnpm install --frozen-lockfile", release_script)
+
     def test_historical_wix_sdk_is_not_versioned_in_the_source_tree(self) -> None:
         self.assertFalse((ROOT / "src-tauri" / "WinxTools").exists())
 

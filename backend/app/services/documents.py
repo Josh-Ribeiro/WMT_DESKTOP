@@ -5,6 +5,7 @@ from __future__ import annotations
 import datetime
 import concurrent.futures
 import copy
+import difflib
 import hashlib
 import io
 import json
@@ -234,6 +235,48 @@ def apply_terms_text_replacements(text: str, replacements: dict[str, str]) -> tu
     return replaced, matched
 
 
+def _redistribute_replaced_text(
+    original_parts: list[str],
+    replaced: str,
+) -> list[str]:
+    """Keep unchanged text in its original Word run and style replacements locally."""
+    original = "".join(original_parts)
+    if original == replaced:
+        return original_parts
+
+    boundaries: list[tuple[int, int]] = []
+    offset = 0
+    for part in original_parts:
+        boundaries.append((offset, offset + len(part)))
+        offset += len(part)
+    output = ["" for _part in original_parts]
+
+    def run_at(position: int) -> int:
+        if not boundaries:
+            return 0
+        for index, (start, end) in enumerate(boundaries):
+            if start <= position < end:
+                return index
+        return len(boundaries) - 1
+
+    def append_original_slice(start: int, end: int) -> None:
+        for index, (run_start, run_end) in enumerate(boundaries):
+            overlap_start = max(start, run_start)
+            overlap_end = min(end, run_end)
+            if overlap_start < overlap_end:
+                output[index] += original[overlap_start:overlap_end]
+
+    matcher = difflib.SequenceMatcher(a=original, b=replaced, autojunk=False)
+    for operation, source_start, source_end, target_start, target_end in matcher.get_opcodes():
+        if operation == "equal":
+            append_original_slice(source_start, source_end)
+        elif operation in {"replace", "insert"}:
+            anchor = source_start if source_start < len(original) else source_start - 1
+            output[run_at(max(0, anchor))] += replaced[target_start:target_end]
+        # A delete intentionally contributes no text.
+    return output
+
+
 def replace_docx_paragraph_tokens(xml: str, replacements: dict[str, str]) -> tuple[str, set[str]]:
     matched: set[str] = set()
 
@@ -250,14 +293,21 @@ def replace_docx_paragraph_tokens(xml: str, replacements: dict[str, str]) -> tup
         if replaced == combined:
             return paragraph
 
+        redistributed = _redistribute_replaced_text(
+            [unescape(item.group(2)) for item in text_matches],
+            replaced,
+        )
         output_parts = []
         cursor = 0
         for index, item in enumerate(text_matches):
             output_parts.append(paragraph[cursor:item.start()])
-            if index == 0:
-                output_parts.append(f"{item.group(1)}{escape(replaced, quote=False)}{item.group(3)}")
-            else:
-                output_parts.append(f"{item.group(1)}{item.group(3)}")
+            value = redistributed[index]
+            start_tag = item.group(1)
+            if value != value.strip() and "xml:space=" not in start_tag:
+                start_tag = start_tag[:-1] + ' xml:space="preserve">'
+            output_parts.append(
+                f"{start_tag}{escape(value, quote=False)}{item.group(3)}"
+            )
             cursor = item.end()
         output_parts.append(paragraph[cursor:])
         return "".join(output_parts)
@@ -282,8 +332,12 @@ def replace_docx_xml_tokens(content: bytes, replacements: dict[str, str]) -> tup
             continue
 
         matched.update(text_matches)
+        redistributed = _redistribute_replaced_text(
+            [node.text or "" for node in text_nodes],
+            replaced,
+        )
         for index, node in enumerate(text_nodes):
-            node.text = replaced if index == 0 else ""
+            node.text = redistributed[index]
 
     return ET.tostring(root, encoding="utf-8", xml_declaration=True), matched
 

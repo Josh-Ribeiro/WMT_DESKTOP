@@ -8,6 +8,7 @@ import copy
 import hashlib
 import io
 import json
+import logging
 import os
 import re
 import secrets
@@ -26,6 +27,8 @@ from uuid import uuid4
 from fastapi import Depends, Header, HTTPException, Query, Request
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
+
+logger = logging.getLogger("wmt.inventory")
 
 from .cache import (
     _cache_for,
@@ -239,7 +242,10 @@ def collect_machine_info(host: str) -> dict:
             active_directory = future_result(ad_future, 2.0, {}) or {}
             return {**wmi_info, "active_directory": active_directory}
 
-        print("[collect_machine_info] WMI lookup timed out or failed for", host)
+        logger.warning(
+            "WMI lookup timed out or failed for host %s",
+            host,
+        )
         if printer_future is None:
             printer_future = executor.submit(collect_printer_info, host)
         printer = future_result(printer_future, 4.0, {}) or {}

@@ -119,6 +119,106 @@ class ClientSecurityConfigurationTests(unittest.TestCase):
         self.assertIn("NAVIGATION_ROUTES", sidebar_source)
         self.assertNotIn("components/Sidebar", page_sources)
 
+    def test_authentication_surfaces_use_language_context(self) -> None:
+        login_source = (
+            ROOT / "client" / "src" / "pages" / "Login.tsx"
+        ).read_text(encoding="utf-8")
+        guard_source = (
+            ROOT / "client" / "src" / "components" / "ProtectedRoute.tsx"
+        ).read_text(encoding="utf-8")
+        language_source = (
+            ROOT / "client" / "src" / "contexts" / "LanguageContext.tsx"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("useLanguage()", login_source)
+        self.assertIn("useLanguage()", guard_source)
+        self.assertIn("record.addedNodes.forEach(translateNode)", language_source)
+        self.assertIn("characterData: true", language_source)
+        self.assertIn("attributes: true", language_source)
+        self.assertIn('"placeholder", "title", "aria-label"', language_source)
+        self.assertNotIn("new MutationObserver(run)", language_source)
+
+    def test_admin_settings_are_embedded_and_collapsed_in_account(self) -> None:
+        account_source = (
+            ROOT / "client" / "src" / "pages" / "Account.tsx"
+        ).read_text(encoding="utf-8")
+        policy_source = (
+            ROOT / "client" / "src" / "lib" / "routePolicy.ts"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn('user.role === "admin"', account_source)
+        self.assertIn("<AdminSettings embedded />", account_source)
+        self.assertIn("adminSettingsOpen", account_source)
+        self.assertRegex(
+            policy_source,
+            r'"admin-settings":\s*\{[\s\S]*?navigation:\s*false',
+        )
+
+    def test_custom_backup_destination_uses_folder_picker(self) -> None:
+        backup_source = (
+            ROOT / "client" / "src" / "pages" / "Backup.tsx"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("const selectedPath = await openDialog({", backup_source)
+        self.assertIn("directory: true", backup_source)
+        self.assertIn("setDestinationDrive(", backup_source)
+        self.assertIn("setDestinationFolder(", backup_source)
+        self.assertIn("Selecionar pasta", backup_source)
+
+    def test_dashboard_search_dropdown_is_not_clipped_by_header(self) -> None:
+        dashboard_source = (
+            ROOT / "client" / "src" / "pages" / "Dashboard.tsx"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("relative z-30 overflow-visible", dashboard_source)
+        self.assertIn("overflow-hidden rounded-[inherit]", dashboard_source)
+
+    def test_dashboard_failure_review_opens_contextual_failure_list(self) -> None:
+        dashboard_source = (
+            ROOT / "client" / "src" / "pages" / "Dashboard.tsx"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("const reviewFailures = () =>", dashboard_source)
+        self.assertIn('getElementById("dashboard-attention")', dashboard_source)
+        self.assertIn('id="dashboard-attention"', dashboard_source)
+        self.assertIn("onClick={reviewFailures}", dashboard_source)
+        self.assertIn('title="Excluir falha da lista"', dashboard_source)
+        self.assertIn(
+            "onClick={() => dismissAttentionItem(item.id)}", dashboard_source
+        )
+        self.assertIn("id: `backup-${job.id}`", dashboard_source)
+        self.assertIn("id: `remote-${job.id}`", dashboard_source)
+        self.assertIn("id: `update-${job.id}`", dashboard_source)
+        self.assertRegex(
+            dashboard_source,
+            r'id="dashboard-attention"[\s\S]{0,500}?title="Precisa de atenção"',
+        )
+        review_handler = dashboard_source.split(
+            "const reviewFailures = () =>", 1
+        )[1].split("const attentionItems", 1)[0]
+        self.assertNotIn("setDismissedAttentionIds", review_handler)
+        self.assertNotIn("localStorage.removeItem", review_handler)
+        self.assertNotIn(
+            'onClick={() => navigate("/history")}>\n'
+            "                    <AlertTriangle size={15} /> Revisar falhas",
+            dashboard_source,
+        )
+
+    def test_versioned_runtime_configuration_has_no_internal_machine_name(self) -> None:
+        runtime_files = [
+            ROOT / ".env.production",
+            ROOT / "start_backend.ps1",
+            ROOT / "src-tauri" / "tauri.conf.json",
+            ROOT / "backend" / "data" / "updates" / "latest.json",
+            ROOT / "backend" / "data" / "updates" / "latest-debug.json",
+        ]
+        combined = "\n".join(
+            path.read_text(encoding="utf-8-sig") for path in runtime_files
+        )
+
+        self.assertNotIn("WKS" + "048-", combined)
+        self.assertNotRegex(combined, r"C:\\Users\\[^\\]+\\")
+
     def test_release_script_defaults_to_central_and_supports_sidecar(self) -> None:
         release_script = (
             ROOT / "scripts" / "build-and-release.ps1"

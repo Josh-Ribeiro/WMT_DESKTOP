@@ -66,7 +66,7 @@ class SecurityPrimitiveTests(unittest.TestCase):
         self.assertFalse(verify_password("wrong-password", encoded))
 
     def test_host_validation_rejects_command_fragments(self) -> None:
-        self.assertEqual("WKS048-001BR", validate_backup_host("wks048-001br"))
+        self.assertEqual("WKS001", validate_backup_host("wks001"))
 
         with self.assertRaises(HTTPException):
             validate_backup_host("WKS01; Remove-Item C:\\")

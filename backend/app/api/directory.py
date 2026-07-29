@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import ipaddress
+
 from fastapi import Depends, Header, HTTPException, Query, Request
 from fastapi import APIRouter
 
@@ -30,6 +32,17 @@ from ..services.inventory import (
 )
 
 router = APIRouter()
+
+
+def _is_explicit_device_query(query: str) -> bool:
+    normalized = query.strip().upper()
+    if normalized.startswith("WKS"):
+        return True
+    try:
+        ipaddress.ip_address(normalized)
+        return True
+    except ValueError:
+        return False
 
 
 @router.post("/api/lookup", response_model=LookupResponse)
@@ -79,7 +92,11 @@ def search_ad_users(request: ADUserLookupRequest, user: dict = Depends(current_u
 @router.post("/api/search/universal")
 def universal_search(request: UniversalSearchRequest, user: dict = Depends(current_user)):
     query = request.query.strip()
-    user_result = cached_ad_user_matches(query)
+    user_result = (
+        {"matches": [], "total": 0}
+        if _is_explicit_device_query(query)
+        else cached_ad_user_matches(query)
+    )
     users = (user_result.get("matches") or [])[: request.limit]
     workstations = _universal_workstation_matches(query, request.limit)
     return {
