@@ -16,13 +16,14 @@ from app.main import app
 if __name__ == "__main__":
     import uvicorn
     
-    # Run FastAPI server
-    # Accessible only from localhost for security
-    development = os.getenv("WMT_DEV", "").strip().lower() in {"1", "true", "yes"}
+    development = (
+        os.getenv("WMT_DEV", "").strip().lower() in {"1", "true", "yes"}
+        and not getattr(sys, "frozen", False)
+    )
     uvicorn.run(
         "app.main:app",
-        host="0.0.0.0",
-        port=8000,
+        host=os.getenv("WMT_BACKEND_HOST", "127.0.0.1"),
+        port=int(os.getenv("WMT_BACKEND_PORT", "8000")),
         reload=development,
         log_level="info"
     )

@@ -5,7 +5,7 @@
   "platforms": {
     "windows-x86_64": {
       "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSRk8yZFJEU1RUQ0tuU0NjdzM4TkF3YnVndzFJSW03dVNQOWFsUzZwaUxPbHdCZnJvczRJWFpHdWVKSDBSMk03WVV0T21PeWl1YkRWRDdJa0hhc2FqcWNoSUVTY0pDY0FZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg1MTY0NTgzCWZpbGU6V01UIERlc2t0b3AgRGVidWdfMS4wLjEyMV94NjRfZW4tVVMubXNpCmJydVBGQVVoUWIxYWpZbDFxdjdkclI4N3huT3Z0SmRtbnYyenRMMFRudXlqQTRaaVpiUjQ5Tm1NL1B2bk9qc2JkeGsrVjNOR1o3dk5VNTY4V1VUMEJ3PT0K",
-      "url": "http://wks048-495br:8000/api/updates/WMT%20Desktop%20Debug_1.0.121_x64_en-US-debug.msi"
+      "url": "https://WKS048-495BR/api/updates/WMT%20Desktop%20Debug_1.0.121_x64_en-US-debug.msi"
     }
   }
 }
