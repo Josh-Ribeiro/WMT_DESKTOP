@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { apiRequest } from '@/lib/api';
+import { useState, useEffect, useCallback, useRef } from "react";
+import { apiRequest } from "@/lib/api";
 
 interface UseApiOptions {
   skip?: boolean;
@@ -25,44 +25,47 @@ export function useApi<T>(
   const requestEndpointRef = useRef<string | null>(null);
   const mountedRef = useRef(true);
 
-  const fetchData = useCallback(async (background = false) => {
-    if (requestRef.current && requestEndpointRef.current === endpoint) {
-      return requestRef.current;
-    }
+  const fetchData = useCallback(
+    async (background = false) => {
+      if (requestRef.current && requestEndpointRef.current === endpoint) {
+        return requestRef.current;
+      }
 
-    const request = (async () => {
+      const request = (async () => {
+        try {
+          if (!background) {
+            setLoading(true);
+          }
+          setError(null);
+
+          const result = await apiRequest<T>(endpoint);
+          if (mountedRef.current) {
+            setData(result);
+          }
+        } catch (err) {
+          if (mountedRef.current) {
+            setError(err instanceof Error ? err.message : "Unknown error");
+          }
+        } finally {
+          if (!background && mountedRef.current) {
+            setLoading(false);
+          }
+        }
+      })();
+
+      requestRef.current = request;
+      requestEndpointRef.current = endpoint;
       try {
-      if (!background) {
-        setLoading(true);
-      }
-      setError(null);
-
-      const result = await apiRequest<T>(endpoint);
-        if (mountedRef.current) {
-          setData(result);
-        }
-      } catch (err) {
-        if (mountedRef.current) {
-          setError(err instanceof Error ? err.message : 'Unknown error');
-        }
+        await request;
       } finally {
-        if (!background && mountedRef.current) {
-          setLoading(false);
+        if (requestRef.current === request) {
+          requestRef.current = null;
+          requestEndpointRef.current = null;
         }
       }
-    })();
-
-    requestRef.current = request;
-    requestEndpointRef.current = endpoint;
-    try {
-      await request;
-    } finally {
-      if (requestRef.current === request) {
-        requestRef.current = null;
-        requestEndpointRef.current = null;
-      }
-    }
-  }, [endpoint]);
+    },
+    [endpoint]
+  );
 
   useEffect(() => {
     mountedRef.current = true;
@@ -91,18 +94,23 @@ export function useApi<T>(
           void fetchData(true).finally(scheduleRefresh);
         }
       };
-      document.addEventListener('visibilitychange', handleVisibility);
+      document.addEventListener("visibilitychange", handleVisibility);
       return () => {
         mountedRef.current = false;
         if (timeoutId) clearTimeout(timeoutId);
-        document.removeEventListener('visibilitychange', handleVisibility);
+        document.removeEventListener("visibilitychange", handleVisibility);
       };
     }
 
     return () => {
       mountedRef.current = false;
     };
-  }, [fetchData, options.skip, options.refetchInterval, options.pauseWhenHidden]);
+  }, [
+    fetchData,
+    options.skip,
+    options.refetchInterval,
+    options.pauseWhenHidden,
+  ]);
 
   return { data, loading, error, refetch: () => fetchData() };
 }

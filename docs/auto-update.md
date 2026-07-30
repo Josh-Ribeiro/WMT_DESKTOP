@@ -60,13 +60,13 @@ The debug build changes the app name and identifier to `WMT Desktop Debug`, so i
 Build production:
 
 ```powershell
-.\scripts\build-and-release.ps1 -Channel prod -Type patch -BackendUrl "http://wks048-367br:8000"
+.\scripts\build-and-release.ps1 -Channel prod -Type patch -BackendUrl "https://wmt.example.com"
 ```
 
 Build debug:
 
 ```powershell
-.\scripts\build-and-release.ps1 -Channel debug -Type patch -BackendUrl "http://wks048-367br:8000"
+.\scripts\build-and-release.ps1 -Channel debug -Type patch -BackendUrl "https://wmt.example.com"
 ```
 
 Install the debug MSI once on the validation machines. After that, only those machines will follow `latest-debug.json`; normal users keep following `latest.json`.

@@ -159,7 +159,7 @@ html[data-accent="amber"] {
   --muted: oklch(0.274 0.006 286.033);
   --muted-foreground: oklch(0.705 0.015 286.067);
   --accent: oklch(0.274 0.006 286.033);
-  --accent-foreground:  oklch(0.92 0.005 65);
+  --accent-foreground: oklch(0.92 0.005 65);
   --destructive: oklch(0.704 0.191 22.216);
   --destructive-foreground: oklch(0.985 0 0);
   --border: oklch(1 0 0 / 12%);
@@ -173,7 +173,7 @@ html[data-accent="amber"] {
   --sidebar: oklch(0.18 0.014 255);
   --sidebar-foreground: oklch(0.85 0.005 65);
   --sidebar-accent: oklch(0.274 0.006 286.033);
-  --sidebar-accent-foreground:  oklch(0.985 0 0);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.488 0.243 264.376);
 }
@@ -215,24 +215,72 @@ html[data-accent="amber"] {
 }
 
 @layer base {
+  html {
+    width: 100%;
+    min-width: 20rem;
+    min-height: 100%;
+    color-scheme: light;
+    scroll-behavior: smooth;
+  }
+
+  body,
+  #root {
+    width: 100%;
+    min-width: 20rem;
+    min-height: 100%;
+  }
+
+  #root {
+    min-height: 100dvh;
+  }
+
+  html.dark {
+    color-scheme: dark;
+  }
+
   * {
     @apply border-border outline-ring/50;
   }
   body {
-    @apply bg-background text-foreground;
+    @apply min-w-80 bg-background text-foreground antialiased;
     background-image:
-      linear-gradient(to bottom, color-mix(in oklch, var(--primary) 7%, transparent), transparent 280px),
-      linear-gradient(color-mix(in oklch, var(--border) 52%, transparent) 1px, transparent 1px),
-      linear-gradient(90deg, color-mix(in oklch, var(--border) 52%, transparent) 1px, transparent 1px);
-    background-size: auto, 36px 36px, 36px 36px;
+      linear-gradient(
+        to bottom,
+        color-mix(in oklch, var(--primary) 7%, transparent),
+        transparent 280px
+      ),
+      linear-gradient(
+        color-mix(in oklch, var(--border) 52%, transparent) 1px,
+        transparent 1px
+      ),
+      linear-gradient(
+        90deg,
+        color-mix(in oklch, var(--border) 52%, transparent) 1px,
+        transparent 1px
+      );
+    background-size:
+      auto,
+      36px 36px,
+      36px 36px;
     background-attachment: fixed;
   }
 
   .dark body {
     background-image:
-      linear-gradient(to bottom, color-mix(in oklch, var(--primary) 13%, transparent), transparent 320px),
-      linear-gradient(color-mix(in oklch, var(--border) 38%, transparent) 1px, transparent 1px),
-      linear-gradient(90deg, color-mix(in oklch, var(--border) 38%, transparent) 1px, transparent 1px);
+      linear-gradient(
+        to bottom,
+        color-mix(in oklch, var(--primary) 13%, transparent),
+        transparent 320px
+      ),
+      linear-gradient(
+        color-mix(in oklch, var(--border) 38%, transparent) 1px,
+        transparent 1px
+      ),
+      linear-gradient(
+        90deg,
+        color-mix(in oklch, var(--border) 38%, transparent) 1px,
+        transparent 1px
+      );
   }
   button:not(:disabled),
   [role="button"]:not([aria-disabled="true"]),
@@ -247,7 +295,37 @@ html[data-accent="amber"] {
   }
 }
 
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
 @layer components {
+  .wmt-header {
+    border-color: color-mix(in oklch, var(--primary) 32%, #1e293b);
+    background:
+      radial-gradient(
+        circle at 86% 18%,
+        color-mix(in oklch, var(--primary) 30%, transparent),
+        transparent 34%
+      ),
+      linear-gradient(
+        125deg,
+        color-mix(in oklch, var(--primary) 20%, #020617),
+        #020617 68%
+      );
+  }
+
   /**
    * Custom container utility that centers content and adds responsive padding.
    *
@@ -281,8 +359,16 @@ html[data-accent="amber"] {
   .surface-hero {
     @apply rounded-lg border border-border/70 bg-card/95 shadow-sm backdrop-blur;
     background-image:
-      linear-gradient(135deg, color-mix(in oklch, var(--primary) 12%, transparent), transparent 42%),
-      repeating-linear-gradient(135deg, color-mix(in oklch, var(--border) 55%, transparent) 0 1px, transparent 1px 12px);
+      linear-gradient(
+        135deg,
+        color-mix(in oklch, var(--primary) 12%, transparent),
+        transparent 42%
+      ),
+      repeating-linear-gradient(
+        135deg,
+        color-mix(in oklch, var(--border) 55%, transparent) 0 1px,
+        transparent 1px 12px
+      );
   }
 
   .interactive-row {

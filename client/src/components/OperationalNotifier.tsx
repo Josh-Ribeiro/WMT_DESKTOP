@@ -1,9 +1,15 @@
-import { useEffect, useRef } from 'react';
-import { toast } from 'sonner';
-import { apiRequest, UnauthorizedError } from '@/lib/api';
-import { useAuth } from '@/hooks/useAuth';
+import { useEffect, useRef } from "react";
+import { toast } from "sonner";
+import { apiRequest, UnauthorizedError } from "@/lib/api";
+import { useAuth } from "@/hooks/useAuth";
 
-type Status = 'queued' | 'running' | 'completed' | 'failed' | 'canceled' | string;
+type Status =
+  | "queued"
+  | "running"
+  | "completed"
+  | "failed"
+  | "canceled"
+  | string;
 
 interface DashboardJob {
   id: string;
@@ -22,27 +28,28 @@ interface DashboardSnapshot {
   recent_update_jobs?: DashboardJob[];
 }
 
-const ACTIVE_STATUSES = new Set(['queued', 'running']);
-const FINAL_STATUSES = new Set(['completed', 'failed', 'canceled']);
+const ACTIVE_STATUSES = new Set(["queued", "running"]);
+const FINAL_STATUSES = new Set(["completed", "failed", "canceled"]);
 
 function jobKey(kind: string, job: DashboardJob) {
   return `${kind}:${job.id}`;
 }
 
 function jobTitle(kind: string, job: DashboardJob) {
-  if (kind === 'backup') return `Backup ${job.source || ''} -> ${job.destination || ''}`.trim();
-  if (kind === 'remote') return `Task ${job.host || ''}`.trim();
-  return `Update ${job.host || ''}`.trim();
+  if (kind === "backup")
+    return `Backup ${job.source || ""} -> ${job.destination || ""}`.trim();
+  if (kind === "remote") return `Task ${job.host || ""}`.trim();
+  return `Update ${job.host || ""}`.trim();
 }
 
 function toastFor(kind: string, job: DashboardJob) {
   const title = jobTitle(kind, job);
   const description = job.message || job.summary || job.id;
-  if (job.status === 'completed') {
+  if (job.status === "completed") {
     toast.success(`${title} completed`, { description });
-  } else if (job.status === 'failed') {
+  } else if (job.status === "failed") {
     toast.error(`${title} failed`, { description });
-  } else if (job.status === 'canceled') {
+  } else if (job.status === "canceled") {
     toast.warning(`${title} canceled`, { description });
   }
 }
@@ -78,13 +85,21 @@ export default function OperationalNotifier() {
       inFlight = true;
       let nextDelay = 20000;
       try {
-        const snapshot = await apiRequest<DashboardSnapshot>('/api/operational-jobs');
+        const snapshot = await apiRequest<DashboardSnapshot>(
+          "/api/operational-jobs"
+        );
         if (stopped) return;
 
         const jobs = [
-          ...(snapshot.recent_jobs || []).map((job) => ({ kind: 'backup', job })),
-          ...(snapshot.recent_remote_jobs || []).map((job) => ({ kind: 'remote', job })),
-          ...(snapshot.recent_update_jobs || []).map((job) => ({ kind: 'update', job })),
+          ...(snapshot.recent_jobs || []).map(job => ({ kind: "backup", job })),
+          ...(snapshot.recent_remote_jobs || []).map(job => ({
+            kind: "remote",
+            job,
+          })),
+          ...(snapshot.recent_update_jobs || []).map(job => ({
+            kind: "update",
+            job,
+          })),
         ];
         if (jobs.some(({ job }) => ACTIVE_STATUSES.has(job.status))) {
           nextDelay = 5000;
@@ -124,11 +139,11 @@ export default function OperationalNotifier() {
         void checkJobs();
       }
     };
-    document.addEventListener('visibilitychange', handleVisibility);
+    document.addEventListener("visibilitychange", handleVisibility);
     return () => {
       stopped = true;
       if (timeoutId) window.clearTimeout(timeoutId);
-      document.removeEventListener('visibilitychange', handleVisibility);
+      document.removeEventListener("visibilitychange", handleVisibility);
     };
   }, [loading, user]);
 

@@ -4,19 +4,23 @@
 Script completo: Build + Version + Release para WMT Desktop
 
 .PARAMETER Type
-"major", "minor", "patch" ou vazio para nÃ£o mudar versÃ£o
+"major", "minor", "patch" ou vazio para não mudar versão
 
 .PARAMETER SkipTest
-Se true, pula testes locais
+Se true, pula somente a abertura manual do MSI. As verificacoes automatizadas
+de qualidade e seguranca nunca sao ignoradas.
 
 .PARAMETER BackendUrl
-URL do backend usada pelo app empacotado. Ex: http://10.10.10.20:8000
+URL HTTPS do backend usada pelo app empacotado. Ex: https://wmt.empresa.local
 
 .PARAMETER UpdateEndpoint
 Endpoint do updater. Se omitido, usa BackendUrl + /api/updates/latest.json
 
 .PARAMETER Channel
 Canal de release: prod usa latest.json; debug usa latest-debug.json e instala lado a lado
+
+.PARAMETER BackendMode
+central usa somente BackendUrl; sidecar empacota e inicia o backend local
 
 .PARAMETER ReleaseNotes
 Mensagem exibida ao usuario quando a atualizacao estiver disponivel
@@ -39,6 +43,8 @@ param(
     [string]$UpdateEndpoint = "",
     [ValidateSet("prod", "debug")]
     [string]$Channel = "prod",
+    [ValidateSet("central", "sidecar")]
+    [string]$BackendMode = "central",
     [string]$ReleaseNotes = "",
     [string]$ReleaseNotesFile = "",
     [switch]$SkipReleaseNotesPrompt,
@@ -79,19 +85,20 @@ if ($Help) {
         "USO:",
         "  .\build-and-release.ps1 -Type patch",
         "  .\build-and-release.ps1 -Type minor -SkipTest",
-        "  .\build-and-release.ps1 -BackendUrl http://10.10.10.20:8000",
-        "  .\build-and-release.ps1 -BackendUrl http://10.10.10.20:8000 -UpdateEndpoint http://10.10.10.20:8000/api/updates/latest.json",
-        "  .\build-and-release.ps1 -Channel debug -BackendUrl http://10.10.10.20:8000",
+        "  .\build-and-release.ps1 -BackendUrl https://wmt.empresa.local",
+        "  .\build-and-release.ps1 -BackendUrl https://wmt.empresa.local -UpdateEndpoint https://wmt.empresa.local/api/updates/latest.json",
+        "  .\build-and-release.ps1 -Channel debug -BackendUrl http://127.0.0.1:8000 -UpdateEndpoint https://wmt.empresa.local/api/updates/latest-debug.json",
         "",
         "OPCOES:",
         "  -Type [major|minor|patch]  Tipo de versionamento (opcional)",
         "  -BackendUrl                URL do backend para o app empacotado",
         "  -UpdateEndpoint            URL do latest.json para auto-update",
         "  -Channel [prod|debug]      Canal do update; debug instala separado e usa latest-debug.json",
+        "  -BackendMode              central (padrao) ou sidecar",
         "  -ReleaseNotes              Texto exibido no aviso de atualizacao",
         "  -ReleaseNotesFile          Arquivo TXT/Markdown com as notas da atualizacao",
         "  -SkipReleaseNotesPrompt    Nao pergunta as notas durante o build",
-        "  -SkipTest                  Pula testes locais do MSI",
+        "  -SkipTest                  Pula somente a instalacao manual do MSI",
         "  -Help                      Mostra esta ajuda",
         "",
         "EXEMPLOS:",
@@ -100,9 +107,10 @@ if ($Help) {
         "  .\build-and-release.ps1",
         "  .\build-and-release.ps1 -Type patch -ReleaseNotes ""Busca universal mais rapida e correcoes no monitor.""",
         "  .\build-and-release.ps1 -Type patch -ReleaseNotesFile .\notas.md",
-        "  .\build-and-release.ps1 -BackendUrl http://10.10.10.20:8000",
-        "  .\build-and-release.ps1 -BackendUrl http://10.10.10.20:8000 -UpdateEndpoint http://10.10.10.20:8000/api/updates/latest.json",
-        "  .\build-and-release.ps1 -Channel debug -BackendUrl http://10.10.10.20:8000"
+        "  .\build-and-release.ps1 -BackendUrl https://wmt.empresa.local",
+        "  .\build-and-release.ps1 -BackendUrl https://wmt.empresa.local -UpdateEndpoint https://wmt.empresa.local/api/updates/latest.json",
+        "  .\build-and-release.ps1 -BackendMode sidecar -Channel debug -UpdateEndpoint https://wmt.empresa.local/api/updates/latest-debug.json",
+        "  .\build-and-release.ps1 -Channel debug -BackendUrl http://127.0.0.1:8000 -UpdateEndpoint https://wmt.empresa.local/api/updates/latest-debug.json"
     ) -join [Environment]::NewLine
     Write-Host $helpMessage
     exit 0
@@ -118,14 +126,56 @@ elseif ($env:VITE_API_BASE_URL) {
     $EffectiveBackendUrl = $env:VITE_API_BASE_URL.TrimEnd("/")
     $env:VITE_API_BASE_URL = $EffectiveBackendUrl
 }
-
 $EffectiveUpdateEndpoint = ""
 if ($UpdateEndpoint) {
     $EffectiveUpdateEndpoint = $UpdateEndpoint.TrimEnd("/")
 }
-elseif ($EffectiveBackendUrl) {
+elseif ($EffectiveBackendUrl -and $BackendMode -eq "central") {
     $latestFileName = if ($Channel -eq "debug") { "latest-debug.json" } else { "latest.json" }
     $EffectiveUpdateEndpoint = "$EffectiveBackendUrl/api/updates/$latestFileName"
+}
+
+function Test-LoopbackUrl {
+    param([string]$Url)
+    try {
+        $uri = [Uri]$Url
+        return $uri.Host -in @("localhost", "127.0.0.1", "::1")
+    }
+    catch {
+        return $false
+    }
+}
+
+function Test-PlaceholderUrl {
+    param([string]$Url)
+    if (-not $Url) {
+        return $false
+    }
+    try {
+        $uri = [Uri]$Url
+        return $uri.Host -eq "example.com" -or $uri.Host.EndsWith(".example.com", [System.StringComparison]::OrdinalIgnoreCase)
+    }
+    catch {
+        return $false
+    }
+}
+
+if ($BackendMode -eq "sidecar") {
+    if ($BackendUrl -and -not (Test-LoopbackUrl $BackendUrl)) {
+        throw "BackendMode sidecar aceita somente BackendUrl de loopback."
+    }
+    $EffectiveBackendUrl = "http://127.0.0.1:8000"
+    $env:VITE_API_BASE_URL = $EffectiveBackendUrl
+}
+
+if ($EffectiveBackendUrl -and -not $EffectiveBackendUrl.StartsWith("https://", [System.StringComparison]::OrdinalIgnoreCase)) {
+    $allowedLoopback = ($Channel -eq "debug" -or $BackendMode -eq "sidecar") -and (Test-LoopbackUrl $EffectiveBackendUrl)
+    if (-not $allowedLoopback) {
+        throw "BackendUrl deve usar HTTPS. HTTP e permitido somente para loopback em debug/sidecar."
+    }
+}
+if ($EffectiveUpdateEndpoint -and -not $EffectiveUpdateEndpoint.StartsWith("https://", [System.StringComparison]::OrdinalIgnoreCase)) {
+    throw "UpdateEndpoint deve usar HTTPS."
 }
 
 $updaterPrivateKeyPath = Resolve-Path ".\secrets\wmt-updater.key" -ErrorAction SilentlyContinue
@@ -135,7 +185,7 @@ if ($updaterPrivateKeyPath) {
     Write-Info "Chave privada do updater configurada: $($updaterPrivateKeyPath.Path)"
 }
 else {
-    Write-Warning-Custom "Chave do updater nÃ£o encontrada em .\secrets\wmt-updater.key"
+    Write-Warning-Custom "Chave do updater não encontrada em .\secrets\wmt-updater.key"
 }
 
 # ============================================================================
@@ -146,6 +196,8 @@ Write-Header "1. Verificando Ambiente"
 
 $tauriConfPath = ".\src-tauri\tauri.conf.json"
 $packagePath = ".\package.json"
+$cargoTomlPath = ".\src-tauri\Cargo.toml"
+$backendConfigPath = ".\backend\app\core\config.py"
 $tauriConfOriginal = if (Test-Path $tauriConfPath) { Get-Content $tauriConfPath -Raw } else { "" }
 $tauriConfProdSnapshot = if ($tauriConfOriginal) { $tauriConfOriginal | ConvertFrom-Json } else { $null }
 $script:DebugTauriConfigApplied = $false
@@ -164,8 +216,15 @@ function Restore-ProductionTauriConfig {
     if ($tauriConfProdSnapshot.plugins.updater.endpoints) {
         $tauriConf.plugins.updater.endpoints = $tauriConfProdSnapshot.plugins.updater.endpoints
     }
+    $tauriConf.app.security.csp = $tauriConfProdSnapshot.app.security.csp
     $tauriConf.plugins.updater.dangerousInsecureTransportProtocol = $tauriConfProdSnapshot.plugins.updater.dangerousInsecureTransportProtocol
     $tauriConf.bundle.createUpdaterArtifacts = $tauriConfProdSnapshot.bundle.createUpdaterArtifacts
+    if ($tauriConfProdSnapshot.bundle.PSObject.Properties.Name -contains "externalBin") {
+        $tauriConf.bundle.externalBin = $tauriConfProdSnapshot.bundle.externalBin
+    }
+    elseif ($tauriConf.bundle.PSObject.Properties.Name -contains "externalBin") {
+        $tauriConf.bundle.PSObject.Properties.Remove("externalBin")
+    }
     $tauriConf | ConvertTo-Json -Depth 20 | Out-File $tauriConfPath -Encoding UTF8
     $script:DebugTauriConfigApplied = $false
     Write-Success "Config Tauri de producao restaurada apos build debug."
@@ -176,17 +235,29 @@ trap {
     throw $_
 }
 
+if ($Channel -eq "prod" -and $BackendMode -eq "central") {
+    if (-not $EffectiveBackendUrl) {
+        throw "Build de produção central exige -BackendUrl com a URL HTTPS real do servidor."
+    }
+    if (Test-PlaceholderUrl $EffectiveBackendUrl) {
+        throw "BackendUrl de produção não pode usar o domínio reservado example.com."
+    }
+}
+if (Test-PlaceholderUrl $EffectiveUpdateEndpoint) {
+    throw "UpdateEndpoint não pode usar o domínio reservado example.com."
+}
+
 if (-not (Test-Path $tauriConfPath)) {
-    Write-Host "âœ— Arquivo nÃ£o encontrado: $tauriConfPath" -ForegroundColor Red
+    Write-Host "✗ Arquivo não encontrado: $tauriConfPath" -ForegroundColor Red
     exit 1
 }
 
-# Ler versÃ£o atual
+# Ler versão atual
 $tauriConf = Get-Content $tauriConfPath -Raw | ConvertFrom-Json
 $currentVersion = $tauriConf.version
-Write-Success "VersÃ£o atual: $currentVersion"
+Write-Success "Versão atual: $currentVersion"
 
-# Verificar dependÃªncias
+# Verificar dependências
 $checks = @{
     "Node.js" = { node --version }
     "Python" = { python --version }
@@ -200,16 +271,16 @@ foreach ($check in $checks.GetEnumerator()) {
         Write-Success "$($check.Key): $result"
     }
     catch {
-        Write-Warning-Custom "$($check.Key): NÃƒO ENCONTRADO"
+        Write-Warning-Custom "$($check.Key): NÃO ENCONTRADO"
     }
 }
 
 # ============================================================================
-# PASSO 2: Bumpar versÃ£o (se solicitado)
+# PASSO 2: Bumpar versão (se solicitado)
 # ============================================================================
 
 if ($Type) {
-    Write-Header "2. Bumpar VersÃ£o"
+    Write-Header "2. Bumpar Versão"
 
     $parts = $currentVersion -split '\.'
     [int]$major = $parts[0]
@@ -223,7 +294,7 @@ if ($Type) {
     }
 
     $newVersion = "$major.$minor.$patch"
-    Write-Info "Atualizando versÃ£o: $currentVersion â†’ $newVersion"
+    Write-Info "Atualizando versão: $currentVersion → $newVersion"
 
     $tauriConf.version = $newVersion
     $tauriConf | ConvertTo-Json -Depth 10 | Out-File $tauriConfPath -Encoding UTF8
@@ -232,11 +303,19 @@ if ($Type) {
     $package.version = $newVersion
     $package | ConvertTo-Json -Depth 10 | Out-File $packagePath -Encoding UTF8
 
+    $cargoToml = Get-Content $cargoTomlPath -Raw
+    $cargoToml = $cargoToml -replace '(?m)^(version\s*=\s*")[^"]+(")', "`${1}$newVersion`${2}"
+    Set-Content $cargoTomlPath -Value $cargoToml -Encoding UTF8
+
+    $backendConfig = Get-Content $backendConfigPath -Raw
+    $backendConfig = $backendConfig -replace 'APP_VERSION = os\.getenv\("WMT_VERSION", "[^"]+"\)\.strip\(\) or "[^"]+"', "APP_VERSION = os.getenv(`"WMT_VERSION`", `"$newVersion`").strip() or `"$newVersion`""
+    Set-Content $backendConfigPath -Value $backendConfig -Encoding UTF8
+
     $currentVersion = $newVersion
-    Write-Success "VersÃ£o bumped para $newVersion"
+    Write-Success "Versão atualizada para $newVersion"
 }
 else {
-    Write-Info "VersÃ£o: $currentVersion (nÃ£o serÃ¡ alterada)"
+    Write-Info "Versão: $currentVersion (não será alterada)"
 }
 
 $defaultReleaseNotes = if ($Channel -eq "debug") {
@@ -305,9 +384,29 @@ if ($Channel -eq "debug" -or $EffectiveUpdateEndpoint) {
     }
     if ($EffectiveUpdateEndpoint) {
         $tauriConf.plugins.updater.endpoints = @($EffectiveUpdateEndpoint)
-        $tauriConf.plugins.updater.dangerousInsecureTransportProtocol = $true
+        $tauriConf.plugins.updater.dangerousInsecureTransportProtocol = $false
         $tauriConf.bundle.createUpdaterArtifacts = $true
     }
+    $connectSources = @(
+        "'self'",
+        "ipc:",
+        "http://ipc.localhost",
+        "http://127.0.0.1:8000",
+        "http://localhost:5173",
+        "ws://localhost:5173"
+    )
+    foreach ($configuredUrl in @($EffectiveBackendUrl, $EffectiveUpdateEndpoint)) {
+        if (-not $configuredUrl) {
+            continue
+        }
+        $configuredUri = [Uri]$configuredUrl
+        $origin = $configuredUri.GetLeftPart([System.UriPartial]::Authority)
+        if ($origin -notin $connectSources) {
+            $connectSources += $origin
+        }
+    }
+    $connectSourceText = $connectSources -join " "
+    $tauriConf.app.security.csp = "default-src 'self' customprotocol: asset:; connect-src $connectSourceText; img-src 'self' asset: data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; script-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
     $tauriConf | ConvertTo-Json -Depth 20 | Out-File $tauriConfPath -Encoding UTF8
     if ($Channel -eq "debug") {
         $script:DebugTauriConfigApplied = $true
@@ -320,49 +419,73 @@ if ($Channel -eq "debug" -or $EffectiveUpdateEndpoint) {
     }
 }
 
+$env:WMT_BACKEND_MODE = $BackendMode
+if ($BackendMode -eq "sidecar") {
+    Write-Header "Preparando backend sidecar"
+    & "$PSScriptRoot\build-backend-sidecar.ps1"
+    if ($LASTEXITCODE -ne 0) {
+        throw "Falha ao gerar o backend sidecar."
+    }
+    $tauriConf = Get-Content $tauriConfPath -Raw | ConvertFrom-Json
+    $tauriConf.bundle | Add-Member -NotePropertyName externalBin -NotePropertyValue @("binaries/wmt-backend") -Force
+    $tauriConf | ConvertTo-Json -Depth 20 | Out-File $tauriConfPath -Encoding UTF8
+    $script:DebugTauriConfigApplied = $true
+    Write-Success "Backend sidecar sera incluido no MSI."
+}
+else {
+    Write-Info "Modo central: o Tauri nao iniciara backend local."
+}
+
 # ============================================================================
-# PASSO 3: Instalar dependÃªncias
+# PASSO 3: Instalar dependências
 # ============================================================================
 
-Write-Header "3. Instalando DependÃªncias"
+Write-Header "3. Instalando Dependências"
 
-Write-Info "Executando: pnpm install"
-& pnpm install
-Write-Success "DependÃªncias instaladas"
+Write-Info "Executando: pnpm install --frozen-lockfile"
+& pnpm install --frozen-lockfile
+Write-Success "Dependências instaladas"
+
+Write-Header "4. Quality Gate"
+& "$PSScriptRoot\verify.ps1"
+if ($LASTEXITCODE -ne 0) {
+    throw "As verificacoes automaticas falharam. O release foi interrompido."
+}
+Write-Success "Todas as verificacoes automaticas passaram"
 
 # ============================================================================
-# PASSO 4: Build Frontend
+# PASSO 5: Build Frontend
 # ============================================================================
 
-Write-Header "4. Build do Frontend"
+Write-Header "5. Build do Frontend"
 
 Write-Info "Compilando React + TypeScript + Tailwind..."
 if ($EffectiveBackendUrl) {
     Write-Info "Backend configurado no app: $EffectiveBackendUrl"
 }
 else {
-    Write-Warning-Custom "Backend do app ficarÃ¡ no padrÃ£o: http://127.0.0.1:8000"
+    Write-Warning-Custom "Backend do app ficará no padrão: http://127.0.0.1:8000"
 }
 & pnpm build
 if ($LASTEXITCODE -ne 0) {
-    Write-Host "âœ— Build frontend falhou!" -ForegroundColor Red
+    Write-Host "✗ Build frontend falhou!" -ForegroundColor Red
     exit 1
 }
 if ($EffectiveBackendUrl) {
     $compiledAssets = Get-ChildItem -Path "dist\public\assets" -Filter "*.js" -Recurse -ErrorAction SilentlyContinue
     $compiledBackendUrl = $compiledAssets | Select-String -Pattern ([regex]::Escape($EffectiveBackendUrl)) -Quiet
     if (-not $compiledBackendUrl) {
-        Write-Host "âœ— A URL do backend nÃ£o foi embutida no frontend compilado: $EffectiveBackendUrl" -ForegroundColor Red
+        Write-Host "✗ A URL do backend não foi embutida no frontend compilado: $EffectiveBackendUrl" -ForegroundColor Red
         exit 1
     }
 }
 Write-Success "Frontend compilado"
 
 # ============================================================================
-# PASSO 5: Build Tauri (Main Build)
+# PASSO 6: Build Tauri (Main Build)
 # ============================================================================
 
-Write-Header "5. Build do Tauri (MAIN - vai levar um tempo)"
+Write-Header "6. Build do Tauri (MAIN - vai levar um tempo)"
 
 Write-Info "Compilando Rust + empacotando MSI..."
 Write-Info "Tempo estimado: 5-10 minutos (primeira vez: 30-45 min)"
@@ -373,10 +496,10 @@ $buildEndTime = Get-Date
 $buildDuration = $buildEndTime - $buildStartTime
 
 if ($LASTEXITCODE -eq 0) {
-    Write-Success "Build Tauri concluÃ­do em $($buildDuration.TotalMinutes.ToString('0.0')) minutos"
+    Write-Success "Build Tauri concluído em $($buildDuration.TotalMinutes.ToString('0.0')) minutos"
 }
 else {
-    Write-Host "âœ— Build Tauri falhou!" -ForegroundColor Red
+    Write-Host "✗ Build Tauri falhou!" -ForegroundColor Red
     exit 1
 }
 
@@ -384,17 +507,17 @@ if ($EffectiveBackendUrl) {
     $compiledAssets = Get-ChildItem -Path "dist\public\assets" -Filter "*.js" -Recurse -ErrorAction SilentlyContinue
     $compiledBackendUrl = $compiledAssets | Select-String -Pattern ([regex]::Escape($EffectiveBackendUrl)) -Quiet
     if (-not $compiledBackendUrl) {
-        Write-Host "âœ— O Tauri recompilou o frontend sem a URL do backend: $EffectiveBackendUrl" -ForegroundColor Red
+        Write-Host "✗ O Tauri recompilou o frontend sem a URL do backend: $EffectiveBackendUrl" -ForegroundColor Red
         exit 1
     }
     Write-Success "URL do backend confirmada no app: $EffectiveBackendUrl"
 }
 
 # ============================================================================
-# PASSO 6: Verificar artefatos
+# PASSO 7: Verificar artefatos
 # ============================================================================
 
-Write-Header "6. Verificando Artefatos"
+Write-Header "7. Verificando Artefatos"
 
 $expectedMsiPrefix = if ($Channel -eq "debug") { "WMT Desktop Debug_$currentVersion" } else { "WMT Desktop_$currentVersion" }
 $msiPath = Get-ChildItem -Path "src-tauri\target\release\bundle\msi" -Filter "*.msi" -Recurse -ErrorAction SilentlyContinue |
@@ -419,28 +542,28 @@ foreach ($file in $files) {
         Write-Success "$file ($([Math]::Round($size, 1)) MB)"
     }
     else {
-        Write-Warning-Custom "NÃ£o encontrado: $file"
+        Write-Warning-Custom "Não encontrado: $file"
     }
 }
 
 if (-not $msiPath -or -not (Test-Path $msiPath)) {
-    Write-Host "âœ— MSI nÃ£o encontrado para o canal '$Channel' com prefixo '$expectedMsiPrefix'. Verifique se src-tauri/tauri.conf.json usa a identidade correta e bundle.targets = ['msi']." -ForegroundColor Red
+    Write-Host "✗ MSI não encontrado para o canal '$Channel' com prefixo '$expectedMsiPrefix'. Verifique se src-tauri/tauri.conf.json usa a identidade correta e bundle.targets = ['msi']." -ForegroundColor Red
     exit 1
 }
 
 # ============================================================================
-# PASSO 7: Testar MSI (opcional)
+# PASSO 8: Testar MSI (opcional)
 # ============================================================================
 
 if (-not $SkipTest) {
-    Write-Header "7. Testando MSI Localmente"
+    Write-Header "8. Testando MSI Localmente"
 
-    $testResponse = Read-Host "Deseja testar a instalaÃ§Ã£o do MSI? (y/n) [n]"
+    $testResponse = Read-Host "Deseja testar a instalação do MSI? (y/n) [n]"
 
     if ($testResponse -eq 'y') {
         Write-Info "Abrindo: $msiPath"
         Start-Process -FilePath $msiPath -Wait
-        Write-Info "Teste concluÃ­do. VocÃª pode desinstalar o app agora se desejar."
+        Write-Info "Teste concluído. Você pode desinstalar o app agora se desejar."
     }
     else {
         Write-Info "Teste pulado"
@@ -448,16 +571,16 @@ if (-not $SkipTest) {
 }
 
 # ============================================================================
-# PASSO 8: Preparar Release
+# PASSO 9: Preparar Release
 # ============================================================================
 
-Write-Header "8. Preparando Release"
+Write-Header "9. Preparando Release"
 
 $releaseDir = if ($Channel -eq "debug") { ".\releases\debug\$currentVersion" } else { ".\releases\$currentVersion" }
 
 if (-not (Test-Path $releaseDir)) {
     mkdir $releaseDir -Force | Out-Null
-    Write-Success "DiretÃ³rio criado: $releaseDir"
+    Write-Success "Diretório criado: $releaseDir"
 }
 
 $releaseMsiLeaf = Split-Path $msiPath -Leaf
@@ -514,7 +637,7 @@ if ($EffectiveBackendUrl -and $sigPath -and (Test-Path $sigPath)) {
     Write-Success "${latestJsonName}: $EffectiveBackendUrl/api/updates/$latestJsonName"
 }
 elseif ($EffectiveBackendUrl) {
-    Write-Warning-Custom "Update nÃ£o publicado porque o arquivo .sig nÃ£o foi encontrado."
+    Write-Warning-Custom "Update não publicado porque o arquivo .sig não foi encontrado."
 }
 
 # Criar arquivo de release notes
@@ -532,10 +655,10 @@ $effectiveReleaseNotes
 Write-Success "RELEASE_NOTES.md criado com as notas informadas."
 
 # ============================================================================
-# PASSO 9: InstruÃ§Ãµes Finais
+# PASSO 10: Instruções Finais
 # ============================================================================
 
-Write-Header "9. PrÃ³ximos Passos"
+Write-Header "10. Próximos Passos"
 
 $finalMessage = @(
     "Build concluido com sucesso!",

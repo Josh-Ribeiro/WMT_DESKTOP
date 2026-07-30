@@ -33,7 +33,9 @@ export function ThemeProvider({
     return defaultTheme;
   });
   const [accentColor, setAccentColor] = useState<AccentColor>(() => {
-    const stored = localStorage.getItem("wmt_accent_color") as AccentColor | null;
+    const stored = localStorage.getItem(
+      "wmt_accent_color"
+    ) as AccentColor | null;
     return stored || "blue";
   });
 
@@ -63,7 +65,16 @@ export function ThemeProvider({
     : undefined;
 
   return (
-    <ThemeContext.Provider value={{ theme, accentColor, setTheme, setAccentColor, toggleTheme, switchable }}>
+    <ThemeContext.Provider
+      value={{
+        theme,
+        accentColor,
+        setTheme,
+        setAccentColor,
+        toggleTheme,
+        switchable,
+      }}
+    >
       {children}
     </ThemeContext.Provider>
   );

@@ -34,6 +34,8 @@ function Write-Success {
 
 $tauriConfPath = ".\src-tauri\tauri.conf.json"
 $packagePath = ".\package.json"
+$cargoTomlPath = ".\src-tauri\Cargo.toml"
+$backendConfigPath = ".\backend\app\core\config.py"
 
 if (-not (Test-Path $tauriConfPath)) {
     Write-Host "✗ Não encontrado: $tauriConfPath" -ForegroundColor Red
@@ -76,10 +78,20 @@ $package.version = $NewVersion
 $package | ConvertTo-Json -Depth 10 | Out-File $packagePath -Encoding UTF8
 Write-Success "Atualizado: $packagePath"
 
+$cargoToml = Get-Content $cargoTomlPath -Raw
+$cargoToml = $cargoToml -replace '(?m)^(version\s*=\s*")[^"]+(")', "`${1}$NewVersion`${2}"
+Set-Content $cargoTomlPath -Value $cargoToml -Encoding UTF8
+Write-Success "Atualizado: $cargoTomlPath"
+
+$backendConfig = Get-Content $backendConfigPath -Raw
+$backendConfig = $backendConfig -replace 'APP_VERSION = os\.getenv\("WMT_VERSION", "[^"]+"\)\.strip\(\) or "[^"]+"', "APP_VERSION = os.getenv(`"WMT_VERSION`", `"$NewVersion`").strip() or `"$NewVersion`""
+Set-Content $backendConfigPath -Value $backendConfig -Encoding UTF8
+Write-Success "Atualizado: $backendConfigPath"
+
 Write-Header "Próximos Passos"
 Write-Host @"
 1. Fazer commit:
-   git add src-tauri/tauri.conf.json package.json
+   git add src-tauri/tauri.conf.json src-tauri/Cargo.toml package.json backend/app/core/config.py
    git commit -m "Bump version to $NewVersion"
 
 2. Fazer build:

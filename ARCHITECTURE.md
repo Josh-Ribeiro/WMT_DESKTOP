@@ -12,7 +12,7 @@ Transformação de aplicação web FastAPI + Jinja2 para aplicação desktop mul
 | **Desktop Framework** | Tauri 2.x | Empacotamento e integração OS |
 | **Backend** | FastAPI (Python) | API local para lógica de negócio |
 | **Scripts** | PowerShell 7+ | Operações remotas em workstations |
-| **Database** | JSON/SQLite (local) | Persistência de dados locais |
+| **Database** | SQLite (local) | Estado transacional e migração do JSON legado |
 | **IPC** | Tauri Commands | Comunicação Frontend ↔ Backend |
 
 ## Arquitetura de Camadas
@@ -88,16 +88,39 @@ wmt-desktop/
 ├── backend/                      # Python FastAPI
 │   ├── main.py                  # Entry point
 │   ├── app/
-│   │   ├── main.py
-│   │   ├── routes.py
-│   │   ├── config.py
-│   │   ├── auth.py
-│   │   ├── logger.py
-│   │   ├── cache.py
-│   │   ├── middleware.py
-│   │   ├── printer_snmp.py
-│   │   ├── audit.py
-│   │   └── metrics.py
+│   │   ├── main.py              # App factory e registro dos routers
+│   │   ├── schemas.py           # Modelos de entrada e saída
+│   │   ├── runtime.py           # Fachada de compatibilidade
+│   │   ├── core/
+│   │   │   ├── config.py        # Ambiente e constantes
+│   │   │   ├── security.py      # Hash, papéis e utilitários SSO
+│   │   │   ├── validators.py    # Validação compartilhada
+│   │   │   └── utils.py         # Utilitários de plataforma
+│   │   ├── repositories/
+│   │   │   └── state.py         # Persistência JSON atual
+│   │   ├── services/
+│   │   │   ├── auth.py
+│   │   │   ├── backup.py
+│   │   │   ├── diagnostics.py
+│   │   │   ├── directory.py
+│   │   │   ├── documents.py
+│   │   │   ├── inventory.py
+│   │   │   ├── powershell.py
+│   │   │   ├── remote_jobs.py
+│   │   │   └── ...
+│   │   └── api/                 # Camada HTTP por domínio
+│   │       ├── auth.py
+│   │       ├── backup.py
+│   │       ├── dashboard.py
+│   │       ├── diagnostics.py
+│   │       ├── directory.py
+│   │       ├── documents.py
+│   │       ├── remote_operations.py
+│   │       ├── settings.py
+│   │       ├── software_center.py
+│   │       ├── system.py
+│   │       ├── update_jobs.py
+│   │       └── users.py
 │   ├── scripts/                 # PowerShell scripts
 │   │   ├── consulta.ps1
 │   │   ├── applications.ps1
@@ -108,9 +131,9 @@ wmt-desktop/
 │   │   ├── remote_action.ps1
 │   │   └── temporary_share.ps1
 │   ├── data/
-│   │   ├── users.json
-│   │   ├── operation_audit.jsonl
-│   │   └── workstations.json
+│   │   ├── state.db              # Estado transacional
+│   │   ├── state.json            # Legado, somente para migração
+│   │   └── updates/              # Manifestos e artefatos
 │   ├── requirements.txt
 │   └── venv/                    # Virtual environment
 ├── package.json
@@ -127,14 +150,15 @@ wmt-desktop/
 Tauri App Start
   ↓
 Tauri Runtime (Rust)
-  ├─→ Inicia Backend Python (subprocess)
-  ├─→ Aguarda disponibilidade da API (localhost:8000)
+  ├─→ Modo central: usa a API HTTPS configurada
+  ├─→ Modo sidecar: inicia wmt-backend.exe em loopback
+  ├─→ Valida /health/ready e api_version
   └─→ Carrega Frontend React
   
 Frontend React
-  ├─→ Verifica autenticação (localStorage/session)
+  ├─→ Restaura sessão por cookie HttpOnly
   ├─→ Se não autenticado → Mostra Login
-  └─→ Se autenticado → Carrega Dashboard
+  └─→ Aplica política central de rota e permissão
 ```
 
 ### 2. Requisição de Dados
@@ -274,21 +298,19 @@ fn open_file_dialog() -> String {
 ### Variáveis de Ambiente
 
 ```env
-# Backend
-DEBUG=true
-LOG_TO_FILE=true
-POWERSHELL_TIMEOUT=30
-AUTH_ENABLED=true
-AUTH_USERNAME=admin
-AUTH_PASSWORD=admin123
-CACHE_ENABLED=true
-CACHE_TTL=300
+# Bootstrap local opcional
+WMT_BOOTSTRAP_ADMIN_USERNAME=admin
+WMT_BOOTSTRAP_ADMIN_PASSWORD=<senha-exclusiva-com-12-ou-mais-caracteres>
+WMT_BOOTSTRAP_ADMIN_EMAIL=wmt-admin@empresa.local
 
-# GTI SQL Server
-GTI_SQL_SERVER=PSQLAPP048-02BR
-GTI_SQL_DATABASE=PirelliTools
-GTI_SQL_USER=sfloor
-GTI_SQL_PASSWORD=perdigao75
+# Persistência
+WMT_STATE_DB_PATH=C:\ProgramData\WMT\state.db
+
+# SSO via proxy local/IIS
+WMT_SSO_ENABLED=true
+WMT_SSO_TRUSTED_PROXY_IPS=127.0.0.1,::1
+WMT_SSO_ALLOWED_GROUPS=<grupo-autorizado>
+WMT_SSO_ADMIN_GROUPS=<grupo-administrador>
 
 # Tauri
 TAURI_PRIVATE_KEY=<key>
@@ -297,11 +319,31 @@ TAURI_KEY_PASSWORD=<password>
 
 ## Segurança
 
-1. **Autenticação:** Implementada no FastAPI com JWT/Session
+1. **Autenticação:** Sessões opacas gerenciadas pelo FastAPI
 2. **Autorização:** RBAC (Role-Based Access Control)
-3. **Comunicação:** HTTP local (localhost:8000) - sem exposição externa
-4. **Credenciais:** Armazenadas em arquivo seguro ou variáveis de ambiente
-5. **Logs:** Auditoria de todas as operações
+3. **Sessão:** Cookie `HttpOnly` e CSRF em memória; bearer desativado por padrão
+4. **Comunicação:** HTTPS em produção; HTTP somente para loopback em desenvolvimento
+5. **Credenciais:** Não há senha padrão; bootstrap exige segredo externo
+6. **Cliente:** CSP ativa e atualizador restrito a HTTPS assinado
+7. **Logs:** Auditoria de todas as operações
+
+## Runtime do Backend
+
+Builds corporativos usam o modo `central` e não iniciam um backend local.
+Edições locais podem usar `sidecar`, empacotado como executável independente de
+Python. O Tauri valida `service` e `api_version`, mantém logs persistentes e
+encerra somente o processo que iniciou.
+
+Consulte [Runtime do backend](docs/backend-runtime.md).
+
+## Autorização no React
+
+`AuthProvider`, `AuthenticationGuard`, `PermissionGuard` e
+`AuthenticatedLayout` formam a camada central de sessão e navegação. Menu e
+roteador usam a mesma política declarada em `client/src/lib/routePolicy.ts`.
+O FastAPI permanece como autoridade final.
+
+Consulte [Autorização no frontend](docs/frontend-authorization.md).
 
 ## Empacotamento e Distribuição
 

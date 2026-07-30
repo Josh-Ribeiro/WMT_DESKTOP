@@ -1,3 +1,3 @@
-Set-Location "C:\wmt-desktop\backend"
+Set-Location (Join-Path $PSScriptRoot "backend")
 
-C:\Users\et1ribeijo\AppData\Local\Programs\Python\Python314\python.exe main.py
+python main.py

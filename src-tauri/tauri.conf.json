@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "WMT Desktop",
-  "version": "1.0.122",
+  "version": "1.0.123",
   "identifier": "com.wmt.desktop",
   "build": {
     "beforeBuildCommand": "corepack pnpm build",
@@ -25,7 +25,7 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self' customprotocol: asset:; connect-src 'self' ipc: http://ipc.localhost http://127.0.0.1:8000 http://localhost:5173 ws://localhost:5173 https://wmt.example.com; img-src 'self' asset: data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; script-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
     }
   },
   "bundle": {
@@ -44,10 +44,10 @@
   },
   "plugins": {
     "updater": {
-      "dangerousInsecureTransportProtocol": true,
+      "dangerousInsecureTransportProtocol": false,
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDhEMzI0MEQ1MTY3M0I0NQpSV1JGTzJkUkRTVFRDRDNCTnNTNWk1OWp2V05qM3o2TS8ycDlqaExEYkpjMnQ1VENhekVxWU5QZgo=",
       "endpoints": [
-        "http://wks048-495br:8000/api/updates/latest.json"
+        "https://wmt.example.com/api/updates/latest.json"
       ],
       "windows": {
         "installMode": "passive"

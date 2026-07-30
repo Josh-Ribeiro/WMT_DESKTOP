@@ -62,16 +62,27 @@ pip install -r backend/requirements.txt
 
 ### 4. Configurar variáveis de ambiente
 
-```bash
-# Copiar arquivo de exemplo
-cp backend/.env.example backend/.env
+```powershell
+# Bootstrap local opcional (mínimo de 12 caracteres)
+$env:WMT_BOOTSTRAP_ADMIN_USERNAME = "admin"
+$env:WMT_BOOTSTRAP_ADMIN_PASSWORD = "uma-senha-inicial-exclusiva"
+$env:WMT_BOOTSTRAP_ADMIN_EMAIL = "wmt-admin@empresa.local"
 
-# Editar backend/.env com suas configurações
-# Principais variáveis:
-# - AUTH_USERNAME / AUTH_PASSWORD
-# - GTI_SQL_SERVER / GTI_SQL_DATABASE / GTI_SQL_USER / GTI_SQL_PASSWORD
-# - REMOTE_ADMIN_USER / REMOTE_ADMIN_PASS
+# Persistência; o padrão é backend/data/state.db
+$env:WMT_STATE_DB_PATH = "C:\ProgramData\WMT\state.db"
+
+# Cookies de produção (HTTPS)
+$env:WMT_SESSION_COOKIE_SECURE = "true"
+$env:WMT_SESSION_COOKIE_SAMESITE = "none"
+$env:WMT_ALLOW_BEARER_AUTH = "false"
+
+# Operações remotas, quando necessárias
+$env:REMOTE_ADMIN_USER = "DOMINIO\conta-servico"
+$env:REMOTE_ADMIN_PASS = "segredo-fornecido-pelo-cofre"
 ```
+
+Não há usuário ou senha padrão. Remova a variável de bootstrap depois de
+confirmar o primeiro acesso.
 
 ## Desenvolvimento
 
@@ -148,15 +159,23 @@ wmt-desktop/
 │   └── public/
 ├── backend/                   # Backend FastAPI + Python
 │   ├── app/
-│   │   ├── main.py           # Aplicação FastAPI
-│   │   ├── config.py         # Configuração
-│   │   └── ...
+│   │   ├── main.py           # Composição da aplicação FastAPI
+│   │   ├── schemas.py        # Contratos Pydantic da API
+│   │   ├── core/             # Configuração, segurança e validadores
+│   │   ├── repositories/     # Persistência do estado
+│   │   ├── services/         # Regras operacionais por domínio
+│   │   ├── runtime.py        # Fachada temporária de compatibilidade
+│   │   └── api/              # Rotas separadas por domínio
+│   │       ├── auth.py
+│   │       ├── backup.py
+│   │       ├── diagnostics.py
+│   │       └── ...
 │   ├── scripts/              # Scripts PowerShell
 │   │   ├── consulta.ps1
 │   │   ├── applications.ps1
 │   │   ├── backup.ps1
 │   │   └── ...
-│   ├── data/                 # Dados locais (JSON)
+│   ├── data/                 # SQLite e artefatos locais
 │   ├── main.py               # Entry point
 │   ├── requirements.txt
 │   └── venv/                 # Virtual environment
@@ -192,7 +211,7 @@ wmt-desktop/
 
 ```bash
 # Verificar se o backend está rodando
-curl http://localhost:8000/api/health
+curl http://localhost:8000/health/ready
 
 # Se não funcionar, iniciar manualmente:
 cd backend
@@ -205,22 +224,6 @@ python main.py
 - Verificar se os scripts estão em `backend/scripts/`
 - Verificar permissões: `ls -la backend/scripts/`
 - No Windows, pode ser necessário executar: `Set-ExecutionPolicy -ExecutionPolicy RemoteSigned`
-
-### Erro: "PYODBC driver not found"
-
-```bash
-# Windows
-pip install pyodbc
-# Instalar ODBC Driver 17 for SQL Server
-
-# macOS
-brew install unixodbc
-pip install pyodbc
-
-# Linux
-sudo apt-get install unixodbc-dev
-pip install pyodbc
-```
 
 ### Erro ao compilar Tauri
 
@@ -235,14 +238,33 @@ cargo build --release
 
 ## Segurança
 
-1. **Autenticação**: Implementada com JWT/Session no FastAPI
+1. **Autenticação**: Sessão opaca em cookie `HttpOnly` com proteção CSRF
 2. **Autorização**: RBAC (Role-Based Access Control)
-3. **Comunicação**: HTTP local (localhost:8000) - sem exposição externa
+3. **Comunicação**: HTTPS no modo central; HTTP apenas em loopback no sidecar
 4. **Credenciais**: Use variáveis de ambiente, nunca commite `.env`
-5. **Logs**: Auditoria de todas as operações em `backend/logs/`
-## Configuração IIS + Windows Authentication (Produção)
+5. **Logs**: Auditoria persistida e logs do sidecar no diretório da aplicação
+## Login Windows sem IIS (Produção)
 
-Para ambientes corporativos com Active Directory, configure o IIS como proxy reverso com autenticação Windows:
+O aplicativo desktop tenta primeiro restaurar uma sessão existente e depois
+identifica automaticamente o usuário Windows:
+
+- backend local: executa `whoami /upn` na sessão iniciada pelo Tauri;
+- backend central: consulta via WMI/CIM a sessão da estação identificada pelo
+  endereço IP direto da conexão.
+
+```powershell
+[Environment]::SetEnvironmentVariable('WMT_SSO_ENABLED', 'true', 'Machine')
+[Environment]::SetEnvironmentVariable('WMT_SSO_DESKTOP_FALLBACK', 'true', 'Machine')
+[Environment]::SetEnvironmentVariable('WMT_SSO_CLIENT_IP_FALLBACK', 'true', 'Machine')
+```
+
+Veja [Login Windows sem IIS](docs/sso-windows-without-iis.md) para os requisitos
+de rede, firewall e permissões.
+
+## Configuração opcional com IIS + Windows Authentication
+
+Caso o ambiente use IIS, ele também pode funcionar como proxy reverso com
+autenticação Windows:
 
 ### Documentação Completa
 
@@ -273,8 +295,8 @@ cd c:\Users\...\wmt-desktop
 3. Navegador envia credenciais Windows (Kerberos/NTLM)
 4. IIS valida no Active Directory
 5. IIS reescreve para http://127.0.0.1:8000 com header X-Remote-User
-6. Backend FastAPI cria sessão/token JWT
-7. Frontend recebe token e usa para chamadas subsequentes
+6. Backend FastAPI cria a sessão e devolve cookie `HttpOnly`
+7. Frontend usa o cookie e um token CSRF mantido apenas em memória
 ```
 
 ### Variáveis de Ambiente Essenciais

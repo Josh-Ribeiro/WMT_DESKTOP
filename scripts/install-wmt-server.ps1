@@ -14,7 +14,7 @@ URL Rewrite and ARR are external IIS extensions. The script can try winget with
 them manually before running the IIS part.
 
 .EXAMPLE
-.\scripts\install-wmt-server.ps1 -PublicUrl "http://WKS048-51BR" -ServiceAccount "GROUP\svc_wmt"
+.\scripts\install-wmt-server.ps1 -PublicUrl "http://WMT-SERVER" -ServiceAccount "GROUP\svc_wmt"
 
 .EXAMPLE
 .\scripts\install-wmt-server.ps1 -PublicUrl "https://wmt.company.local" -SiteName "WMT" -HostHeader "wmt.company.local" -BuildFrontend

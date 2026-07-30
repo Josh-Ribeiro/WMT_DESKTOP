@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState } from "react";
 import {
   Dialog,
   DialogContent,
@@ -6,17 +6,17 @@ import {
   DialogHeader,
   DialogTitle,
   DialogFooter,
-} from '@/components/ui/dialog';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from '@/components/ui/select';
+} from "@/components/ui/select";
 
 interface UserFormDialogProps {
   open: boolean;
@@ -35,20 +35,20 @@ export function UserFormDialog({
 }: UserFormDialogProps) {
   const [formData, setFormData] = useState(
     initialData || {
-      username: '',
-      email: '',
-      role: 'viewer',
-      password: '',
+      username: "",
+      email: "",
+      role: "viewer",
+      password: "",
     }
   );
 
   useEffect(() => {
     setFormData(
       initialData || {
-        username: '',
-        email: '',
-        role: 'viewer',
-        password: '',
+        username: "",
+        email: "",
+        role: "viewer",
+        password: "",
       }
     );
   }, [initialData, open]);
@@ -64,7 +64,9 @@ export function UserFormDialog({
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>
-            {initialData ? 'Update user information' : 'Create a new user account'}
+            {initialData
+              ? "Update user information"
+              : "Create a new user account"}
           </DialogDescription>
         </DialogHeader>
 
@@ -74,7 +76,9 @@ export function UserFormDialog({
             <Input
               id="username"
               value={formData.username}
-              onChange={(e) => setFormData({ ...formData, username: e.target.value })}
+              onChange={e =>
+                setFormData({ ...formData, username: e.target.value })
+              }
               placeholder="Enter username"
               className="mt-1"
             />
@@ -86,7 +90,9 @@ export function UserFormDialog({
               id="email"
               type="email"
               value={formData.email}
-              onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+              onChange={e =>
+                setFormData({ ...formData, email: e.target.value })
+              }
               placeholder="Enter email"
               className="mt-1"
             />
@@ -94,7 +100,10 @@ export function UserFormDialog({
 
           <div>
             <Label htmlFor="role">Role</Label>
-            <Select value={formData.role} onValueChange={(value) => setFormData({ ...formData, role: value })}>
+            <Select
+              value={formData.role}
+              onValueChange={value => setFormData({ ...formData, role: value })}
+            >
               <SelectTrigger className="mt-1">
                 <SelectValue />
               </SelectTrigger>
@@ -113,7 +122,9 @@ export function UserFormDialog({
                 id="password"
                 type="password"
                 value={formData.password}
-                onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                onChange={e =>
+                  setFormData({ ...formData, password: e.target.value })
+                }
                 placeholder="Enter password"
                 className="mt-1"
               />
@@ -123,7 +134,12 @@ export function UserFormDialog({
           {initialData && (
             <div>
               <Label htmlFor="status">Status</Label>
-              <Select value={formData.status || 'active'} onValueChange={(value) => setFormData({ ...formData, status: value })}>
+              <Select
+                value={formData.status || "active"}
+                onValueChange={value =>
+                  setFormData({ ...formData, status: value })
+                }
+              >
                 <SelectTrigger className="mt-1">
                   <SelectValue />
                 </SelectTrigger>
@@ -142,7 +158,7 @@ export function UserFormDialog({
             Cancel
           </Button>
           <Button onClick={handleSubmit}>
-            {initialData ? 'Update' : 'Create'}
+            {initialData ? "Update" : "Create"}
           </Button>
         </DialogFooter>
       </DialogContent>

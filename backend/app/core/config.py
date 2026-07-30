@@ -80,7 +80,7 @@ SERVICE_NAME = "wmt-backend"
 API_VERSION = 1
 
 
-APP_VERSION = os.getenv("WMT_VERSION", "1.0.122").strip() or "1.0.122"
+APP_VERSION = os.getenv("WMT_VERSION", "1.0.123").strip() or "1.0.123"
 
 
 DEVELOPMENT_MODE = env_bool("WMT_DEV")
@@ -322,3 +322,4 @@ for _prefix, _uri in {
     "pic": "http://schemas.openxmlformats.org/drawingml/2006/picture",
 }.items():
     ET.register_namespace(_prefix, _uri)
+

@@ -64,7 +64,7 @@ Esperado:
 cd backend
 python -m venv venv
 source venv/bin/activate  # ou venv\Scripts\activate no Windows
-pip install -r requirements.txt
+pip install -r requirements-dev.txt
 python main.py
 
 # Esperado:
@@ -86,13 +86,13 @@ pnpm dev
 
 ```bash
 # Terminal 3: Testar endpoints
-curl http://localhost:8000/api/health
-# Esperado: {"status":"ok","service":"WMT Desktop API"}
+curl http://localhost:8000/health
+# Esperado: {"status":"ok"}
 
 curl -X POST http://localhost:8000/api/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"username":"admin","password":"admin123"}'
-# Esperado: {"access_token":"token_placeholder","token_type":"bearer","user":"admin",...}
+  -d '{"username":"admin","password":"<senha-configurada-no-bootstrap>"}'
+# Esperado: {"access_token":"...","token_type":"bearer","user":"admin",...}
 
 curl http://localhost:8000/api/dashboard
 # Esperado: {"total_workstations":2,"online":1,"offline":1,...}
@@ -104,7 +104,7 @@ curl http://localhost:8000/api/workstations
 ### 4. Testar Frontend no navegador
 
 - Abrir http://localhost:5173
-- Fazer login com `admin` / `admin123`
+- Fazer login com o usuário provisionado por bootstrap ou SSO
 - Verificar se o Dashboard carrega
 - Clicar em "Monitor" para ver lista de workstations
 - Clicar em "Refresh" para testar refetch
@@ -115,7 +115,8 @@ curl http://localhost:8000/api/workstations
 - [ ] Login com credenciais válidas
 - [ ] Erro ao fazer login com credenciais inválidas
 - [ ] Logout funciona
-- [ ] Dados de usuário armazenados em localStorage
+- [ ] Sessão restaurada por cookie sem token no localStorage
+- [ ] Operações de escrita rejeitam requisições sem CSRF
 
 ### Dashboard
 - [ ] Carrega dados do backend
@@ -184,7 +185,7 @@ python main.py
 ```bash
 # Reinstalar dependências
 cd backend
-pip install -r requirements.txt
+pip install -r requirements-dev.txt
 
 # Frontend
 pnpm install
@@ -235,4 +236,4 @@ kill -9 <PID>
 Para problemas, verificar:
 1. Saída do backend FastAPI/serviço
 2. Console do navegador (F12)
-3. Histórico e auditoria em `backend/data/state.json`
+3. Estado transacional em `backend/data/state.db`

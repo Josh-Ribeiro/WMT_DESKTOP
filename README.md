@@ -49,7 +49,7 @@ wmt-desktop/
 ### Pré-requisitos
 
 - Node.js 18+
-- Python 3.8+
+- Python 3.11+
 - Rust (para compilação Tauri)
 - PowerShell 5.0+ (Windows)
 
@@ -69,7 +69,7 @@ pnpm install
 3. **Instalar dependências Python**
 ```bash
 cd backend
-pip install -r requirements.txt
+pip install -r requirements-dev.txt
 cd ..
 ```
 
@@ -121,7 +121,7 @@ Se algum comando não existir, instale:
 - Node.js 18+
 - pnpm/Corepack
 - Rust/Cargo
-- Python 3.8+
+- Python 3.11+
 - WiX Toolset 3.14 ou cache local do WiX, conforme abaixo
 
 #### 2. Instalar dependências do projeto
@@ -130,7 +130,7 @@ Se algum comando não existir, instale:
 pnpm install
 
 cd backend
-pip install -r requirements.txt
+pip install -r requirements-dev.txt
 cd ..
 ```
 
@@ -206,13 +206,13 @@ src-tauri\target\release\bundle\msi\WMT Desktop*.msi.sig
 Para gerar release, publicar `latest.json`/`latest-debug.json` e copiar artefatos:
 
 ```powershell
-.\scripts\build-and-release.ps1 -Channel prod -Type patch -BackendUrl "http://SEU-SERVIDOR:8000"
+.\scripts\build-and-release.ps1 -Channel prod -Type patch -BackendUrl "https://SEU-SERVIDOR"
 ```
 
 Build debug lado a lado:
 
 ```powershell
-.\scripts\build-and-release.ps1 -Channel debug -Type patch -BackendUrl "http://SEU-SERVIDOR:8000"
+.\scripts\build-and-release.ps1 -Channel debug -Type patch -BackendUrl "https://SEU-SERVIDOR"
 ```
 
 ## 📚 Estrutura de Rotas
@@ -258,22 +258,48 @@ O sistema usa autenticação baseada em sessão com suporte a RBAC (Role-Based A
 - `operator` - Acesso a operações gerenciais
 - `viewer` - Acesso apenas leitura
 
-**Credenciais de Demo:**
-- Username: `admin`
-- Password: `admin123`
+Não existem credenciais padrão. Para criar o primeiro administrador local,
+defina `WMT_BOOTSTRAP_ADMIN_PASSWORD` com uma senha exclusiva de pelo menos
+12 caracteres antes da primeira inicialização. Remova a variável após confirmar
+o acesso. Em ambientes com SSO, o primeiro usuário também pode ser provisionado
+pelas regras de grupos/usuários configuradas.
 
 ## 🔧 Configuração
 
 ### Variáveis de Ambiente
 
-Criar arquivo `.env` na pasta `backend/`:
+Defina as variáveis no ambiente do processo ou serviço que executa o backend:
 
 ```env
-DATABASE_URL=sqlite:///wmt.db
-SECRET_KEY=your-secret-key-here
-DEBUG=False
-LOG_LEVEL=INFO
+WMT_BOOTSTRAP_ADMIN_USERNAME=admin
+WMT_BOOTSTRAP_ADMIN_PASSWORD=uma-senha-inicial-exclusiva
+WMT_BOOTSTRAP_ADMIN_EMAIL=wmt-admin@empresa.local
+WMT_STATE_DB_PATH=C:\ProgramData\WMT\state.db
+
+WMT_SSO_ENABLED=true
+WMT_SSO_DESKTOP_FALLBACK=true
+WMT_SSO_CLIENT_IP_FALLBACK=true
+WMT_SSO_TRUSTED_PROXY_IPS=127.0.0.1,::1
+WMT_SSO_ALLOWED_GROUPS=CN=WMT-Users,OU=Groups,DC=empresa,DC=local
+WMT_SSO_ADMIN_GROUPS=CN=WMT-Admins,OU=Groups,DC=empresa,DC=local
+
+WMT_LOGIN_RATE_LIMIT_MAX_ATTEMPTS=5
+WMT_LOGIN_RATE_LIMIT_WINDOW_SECONDS=300
+WMT_MAX_CONCURRENT_REMOTE_JOBS=8
+WMT_MAX_CONCURRENT_UPDATE_JOBS=4
+WMT_MAX_CONCURRENT_BACKUP_JOBS=2
 ```
+
+SSO e seus fallbacks ficam desativados por padrão e devem ser habilitados
+explicitamente. Quando SSO está ativo, `WMT_SSO_ALLOWED_GROUPS` é obrigatório;
+uma configuração vazia é recusada. `WMT_SSO_DEBUG_ENABLED` permanece
+desativada.
+
+As origens CORS de produção devem ser adicionadas explicitamente em
+`WMT_CORS_ORIGINS`. Localhost só é aceito automaticamente com `WMT_DEV=true`.
+
+Veja [Login Windows sem IIS](docs/sso-windows-without-iis.md) para os modos
+local (`whoami`) e servidor central (WMI/CIM pela conexão direta).
 
 ## 📝 Scripts PowerShell
 
@@ -302,16 +328,29 @@ Executa operações remotas em workstations:
 
 ## 🧪 Testes
 
+A lista consolidada de documentos está em
+[Documentação do WMT](docs/README.md).
+
+### Backend central ou sidecar
+
+O release corporativo usa `-BackendMode central` e não inicia Python na
+estação. Uma edição local pode usar `-BackendMode sidecar`, que empacota o
+FastAPI em um executável independente.
+
+Veja [Runtime do backend](docs/backend-runtime.md).
+
 ### Testar Backend
 ```bash
-cd backend
-python -m pytest
+python -m unittest discover -s backend/tests -v
 ```
 
 ### Testar Frontend
 ```bash
 pnpm test
 ```
+
+A matriz central de permissões e o layout autenticado estão documentados em
+[Autorização no frontend](docs/frontend-authorization.md).
 
 ## 📦 Dependências Principais
 
@@ -327,8 +366,8 @@ pnpm test
 ### Backend
 - FastAPI
 - Pydantic
-- SQLAlchemy
-- Python-dotenv
+- SQLite nativo
+- Uvicorn
 
 ### Desktop
 - Tauri 2

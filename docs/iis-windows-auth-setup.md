@@ -1,4 +1,8 @@
-# Configurar IIS para Windows Authentication + X-Remote-User
+# Configurar IIS opcional para Windows Authentication + X-Remote-User
+
+O aplicativo desktop não depende de IIS. Este guia se aplica somente aos
+ambientes que optarem por autenticação integrada via proxy. Para o fluxo
+padrão sem IIS, consulte [Login Windows sem IIS](sso-windows-without-iis.md).
 
 ## Pré-requisitos
 
@@ -197,11 +201,12 @@ Procure por:
 
 ```bash
 curl -v \
+  -X POST \
   -H "X-Remote-User: EMPRESA\seu_usuario" \
   http://127.0.0.1:8000/api/auth/sso
 ```
 
-Esperado: 200 + token JWT
+Esperado: `200`, cookie de sessão `HttpOnly` e token CSRF no corpo.
 
 ## 8. Solução de Problemas
 

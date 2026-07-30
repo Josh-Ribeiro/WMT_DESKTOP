@@ -1,21 +1,60 @@
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Sidebar } from '@/components/Sidebar';
-import { UniversalSearch } from '@/components/UniversalSearch';
-import { useAuth } from '@/hooks/useAuth';
-import { useLocation } from 'wouter';
-import { Activity, CheckCircle2, ClipboardList, Clock3, Copy, Gauge, HardDrive, Loader2, PackageSearch, Play, Printer, RefreshCw, Search, ShieldAlert, Sparkles, Wrench } from 'lucide-react';
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  EmptyState,
+  PageHero,
+  PageShell,
+  SectionHeading,
+} from "@/components/PageLayout";
+import { UniversalSearch } from "@/components/UniversalSearch";
+import { useAuthenticatedUser } from "@/hooks/useAuth";
+import { useLocation } from "wouter";
+import {
+  Activity,
+  ArrowRight,
+  CheckCircle2,
+  ClipboardList,
+  Clock3,
+  Copy,
+  Cpu,
+  ExternalLink,
+  Gauge,
+  HardDrive,
+  History,
+  Loader2,
+  MonitorCog,
+  PackageSearch,
+  Play,
+  Printer,
+  RefreshCw,
+  Search,
+  ShieldAlert,
+  Sparkles,
+  Wifi,
+  Wrench,
+} from "lucide-react";
 
-import { useEffect, useRef, useState } from 'react';
-import { apiRequest } from '@/lib/api';
-import { openPathOnHost, openRemoteToolOnHost } from '@/lib/hostOpen';
-import { toast } from 'sonner';
+import { useEffect, useRef, useState } from "react";
+import { apiRequest } from "@/lib/api";
+import {
+  openPathOnHost,
+  openRemoteToolOnHost,
+  openWebUrl,
+} from "@/lib/hostOpen";
+import { toast } from "sonner";
 
 interface LookupResult {
-  device_type?: 'workstation' | 'printer' | string;
+  device_type?: "workstation" | "printer" | string;
   online: boolean;
   hostname: string;
   error?: string;
@@ -47,6 +86,7 @@ interface PrinterSupply {
 
 interface PrinterInfo {
   detected?: boolean;
+  error?: string;
   name?: string;
   hostname?: string;
   model?: string;
@@ -96,7 +136,7 @@ interface SoftwareCenterStatus {
 interface UpdateJob {
   id: string;
   host: string;
-  status: 'queued' | 'running' | 'completed' | 'failed' | 'canceled' | string;
+  status: "queued" | "running" | "completed" | "failed" | "canceled" | string;
   ok: boolean;
   message: string;
   progress: number;
@@ -109,12 +149,13 @@ interface UpdateJob {
 interface RecentLookup {
   host: string;
   online: boolean;
+  deviceType: "workstation" | "printer";
   timestamp: string;
 }
 
 interface DiagnosticCheck {
   name: string;
-  status: 'ok' | 'warn' | 'fail' | string;
+  status: "ok" | "warn" | "fail" | string;
   message?: string;
   data?: unknown;
 }
@@ -130,7 +171,10 @@ interface DiagnosticData {
     disks?: Array<Record<string, unknown>>;
     bitlocker?: Array<Record<string, unknown>>;
     software?: Array<Record<string, unknown>>;
-    cleanup_preview?: Record<string, { items?: number; size_mb?: number; error?: string }>;
+    cleanup_preview?: Record<
+      string,
+      { items?: number; size_mb?: number; error?: string }
+    >;
     cleanup?: Record<string, string>;
   };
   error?: string;
@@ -139,7 +183,7 @@ interface DiagnosticData {
 interface DiagnosticJob {
   id: string;
   host: string;
-  status: 'queued' | 'running' | 'completed' | 'failed' | 'canceled' | string;
+  status: "queued" | "running" | "completed" | "failed" | "canceled" | string;
   message?: string;
   error?: string;
   payload?: DiagnosticData | null;
@@ -161,70 +205,82 @@ interface WorkstationHistoryData {
 }
 
 const quickActions = [
-  { key: 'remote access', label: 'Remote Access' },
-  { key: 'remote assistance', label: 'Remote Assistance' },
-  { key: 'force all actions', label: 'Force All Actions' },
-  { key: 'computer management', label: 'Computer Management' },
-  { key: 'gpupdate', label: 'GPUpdate' },
-  { key: 'restart spooler', label: 'Restart Spooler' },
-  { key: 'renew ip', label: 'Renew IP' },
-  { key: 'clear sccm cache', label: 'Clear SCCM Cache' },
-  { key: 'create temp C share', label: 'Create Temp C Share' },
-  { key: 'remove temp C share', label: 'Remove Temp C Share' },
+  { key: "remote access", label: "Remote Access" },
+  { key: "remote assistance", label: "Remote Assistance" },
+  { key: "force all actions", label: "Force All Actions" },
+  { key: "computer management", label: "Computer Management" },
+  { key: "gpupdate", label: "GPUpdate" },
+  { key: "restart spooler", label: "Restart Spooler" },
+  { key: "renew ip", label: "Renew IP" },
+  { key: "clear sccm cache", label: "Clear SCCM Cache" },
+  { key: "create temp C share", label: "Create Temp C Share" },
+  { key: "remove temp C share", label: "Remove Temp C Share" },
 ];
 
 type QuickAction = (typeof quickActions)[number];
 
 const SOFTWARE_CENTER_POLL_INTERVAL_MS = 10000;
-const LAST_MONITOR_HOST_KEY = 'wmt_monitor_last_host';
-const localRemoteToolActions = new Set(['remote-access', 'remote-assistance', 'computer-management']);
+const LAST_MONITOR_HOST_KEY = "wmt_monitor_last_host";
+const localRemoteToolActions = new Set([
+  "remote-access",
+  "remote-assistance",
+  "computer-management",
+]);
 const lookupLoadingMessages = [
-  'Checking network reachability...',
-  'Collecting workstation inventory...',
-  'Reading Active Directory information...',
-  'Preparing diagnostic preview...',
+  "Verificando a comunicação pela rede...",
+  "Coletando o inventário da estação...",
+  "Lendo informações do Active Directory...",
+  "Preparando o resumo do diagnóstico...",
 ];
 
 function ticketValue(value?: string | number | null) {
-  if (value === undefined || value === null || value === '') return 'N/A';
+  if (value === undefined || value === null || value === "") return "N/A";
   return String(value);
 }
 
 function formatStorageSummary(result: LookupResult) {
   const total = Number(result.storage_total_gb || 0);
   const free = Number(result.storage_free_gb || 0);
-  if (!total) return 'N/A';
+  if (!total) return "N/A";
   const used = Math.max(0, total - free);
   const percent = Math.round((used / total) * 100);
   return `C: ${used} GB usados / ${free} GB livres / ${total} GB total (${percent}% usado)`;
 }
 
 function formatTicketDate(value?: string) {
-  if (!value) return '';
+  if (!value) return "";
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return value;
-  return new Intl.DateTimeFormat('pt-BR', {
-    day: '2-digit',
-    month: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
+  return new Intl.DateTimeFormat("pt-BR", {
+    day: "2-digit",
+    month: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
   }).format(parsed);
 }
 
 function formatLastBoot(value?: string) {
-  if (!value) return '';
+  if (!value) return "";
 
   // WMI/CIM datetime: yyyyMMddHHmmss.ffffff+/-UUU
-  const wmiMatch = value.trim().match(
-    /^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})\.\d{6}([+-])(\d{3})$/,
-  );
+  const wmiMatch = value
+    .trim()
+    .match(/^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})\.\d{6}([+-])(\d{3})$/);
   let parsed: Date;
 
   if (wmiMatch) {
-    const [, year, month, day, hour, minute, second, offsetSign, offsetValue] = wmiMatch;
-    const offsetMinutes = Number(offsetValue) * (offsetSign === '+' ? 1 : -1);
+    const [, year, month, day, hour, minute, second, offsetSign, offsetValue] =
+      wmiMatch;
+    const offsetMinutes = Number(offsetValue) * (offsetSign === "+" ? 1 : -1);
     const utcTimestamp =
-      Date.UTC(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute), Number(second)) -
+      Date.UTC(
+        Number(year),
+        Number(month) - 1,
+        Number(day),
+        Number(hour),
+        Number(minute),
+        Number(second)
+      ) -
       offsetMinutes * 60_000;
     parsed = new Date(utcTimestamp);
   } else {
@@ -232,22 +288,22 @@ function formatLastBoot(value?: string) {
   }
 
   if (Number.isNaN(parsed.getTime())) return value;
-  return new Intl.DateTimeFormat('pt-BR', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
+  return new Intl.DateTimeFormat("pt-BR", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
   }).format(parsed);
 }
 
 function formatHistoryEvent(event: HistoryEvent) {
   const when = formatTicketDate(event.timestamp);
-  const status = event.status ? ` [${event.status}]` : '';
-  const actor = event.actor ? ` por ${event.actor}` : '';
-  const detail = event.detail ? ` - ${event.detail}` : '';
-  return `${when ? `${when} - ` : ''}${event.title}${status}${actor}${detail}`;
+  const status = event.status ? ` [${event.status}]` : "";
+  const actor = event.actor ? ` por ${event.actor}` : "";
+  const detail = event.detail ? ` - ${event.detail}` : "";
+  return `${when ? `${when} - ` : ""}${event.title}${status}${actor}${detail}`;
 }
 
 function buildTicketSummary({
@@ -265,7 +321,11 @@ function buildTicketSummary({
 }) {
   const osInfo = diagnostic?.inventory?.os || {};
   const uptimeHours = osInfo.uptime_hours;
-  const uptime = uptimeHours ? `${String(uptimeHours)}h` : result.last_boot ? `Last boot: ${formatLastBoot(result.last_boot)}` : 'N/A';
+  const uptime = uptimeHours
+    ? `${String(uptimeHours)}h`
+    : result.last_boot
+      ? `Last boot: ${formatLastBoot(result.last_boot)}`
+      : "N/A";
   const recentActions = historyEvents.slice(0, 5).map(formatHistoryEvent);
 
   return [
@@ -275,52 +335,63 @@ function buildTicketSummary({
     `IP: ${ticketValue(result.ip_address)}`,
     `MAC: ${ticketValue(result.mac_address)}`,
     `Serial: ${ticketValue(result.serial_number)}`,
-    `Modelo: ${ticketValue([result.manufacturer, result.model].filter(Boolean).join(' '))}`,
+    `Modelo: ${ticketValue([result.manufacturer, result.model].filter(Boolean).join(" "))}`,
     `Sistema operacional: ${ticketValue(result.os)}`,
     `Uptime: ${uptime}`,
     `Disco: ${formatStorageSummary(result)}`,
-    `SCCM Client: ${softwareCenter?.installed ? 'Instalado' : softwareCenter ? 'Não detectado' : 'Não consultado'}`,
+    `SCCM Client: ${softwareCenter?.installed ? "Instalado" : softwareCenter ? "Não detectado" : "Não consultado"}`,
     `SCCM Service: ${ticketValue(softwareCenter?.serviceStatus)}`,
     `SCCM Version: ${ticketValue(softwareCenter?.clientVersion)}`,
     `Updates pendentes: ${softwareCenter?.pendingUpdates ?? 0}`,
-    activeUpdateJob ? `Update job ativo: ${activeUpdateJob.id} (${activeUpdateJob.status}, ${activeUpdateJob.progress || 0}%)` : 'Update job ativo: N/A',
-    '',
-    'Últimas ações:',
-    ...(recentActions.length ? recentActions.map((item) => `- ${item}`) : ['- Sem ações recentes registradas para este host.']),
-  ].join('\n');
+    activeUpdateJob
+      ? `Update job ativo: ${activeUpdateJob.id} (${activeUpdateJob.status}, ${activeUpdateJob.progress || 0}%)`
+      : "Update job ativo: N/A",
+    "",
+    "Últimas ações:",
+    ...(recentActions.length
+      ? recentActions.map(item => `- ${item}`)
+      : ["- Sem ações recentes registradas para este host."]),
+  ].join("\n");
 }
 
 function diagnosticFromLookup(result: LookupResult): DiagnosticData {
   const total = Number(result.storage_total_gb || 0);
   const free = Number(result.storage_free_gb || 0);
-  const usedPercent = total > 0 ? Math.round(((total - free) / total) * 100) : 0;
+  const usedPercent =
+    total > 0 ? Math.round(((total - free) / total) * 100) : 0;
 
   return {
     host: result.hostname,
-    generated_at: 'Prévia rápida do lookup',
+    generated_at: "Prévia rápida do lookup",
     checks: [
       {
-        name: 'Conectividade',
-        status: result.online ? 'ok' : 'fail',
-        message: result.online ? 'Host respondeu a consulta inicial.' : result.error || 'Host offline ou indisponível.',
+        name: "Conectividade",
+        status: result.online ? "ok" : "fail",
+        message: result.online
+          ? "Host respondeu a consulta inicial."
+          : result.error || "Host offline ou indisponível.",
       },
       {
-        name: 'Active Directory',
-        status: result.active_directory?.found ? 'ok' : 'warn',
-        message: result.active_directory?.found ? 'Objeto encontrado no AD.' : result.active_directory?.error || 'Sem dados do AD.',
+        name: "Active Directory",
+        status: result.active_directory?.found ? "ok" : "warn",
+        message: result.active_directory?.found
+          ? "Objeto encontrado no AD."
+          : result.active_directory?.error || "Sem dados do AD.",
       },
       {
-        name: 'Disco',
-        status: total && free / total < 0.1 ? 'warn' : 'ok',
-        message: total ? `${free} GB livres de ${total} GB (${usedPercent}% usado).` : 'Disco não retornado no lookup.',
+        name: "Disco",
+        status: total && free / total < 0.1 ? "warn" : "ok",
+        message: total
+          ? `${free} GB livres de ${total} GB (${usedPercent}% usado).`
+          : "Disco não retornado no lookup.",
       },
     ],
     inventory: {
       os: {
         caption: result.os,
-        version: '',
-        build: '',
-        uptime_hours: '',
+        version: "",
+        build: "",
+        uptime_hours: "",
       },
       computer: {
         manufacturer: result.manufacturer,
@@ -336,7 +407,7 @@ function diagnosticFromLookup(result: LookupResult): DiagnosticData {
       disks: total
         ? [
             {
-              DeviceID: 'C:',
+              DeviceID: "C:",
               FreeGB: free,
               SizeGB: total,
             },
@@ -352,25 +423,29 @@ function diagnosticFromLookup(result: LookupResult): DiagnosticData {
 }
 
 function canonicalRemoteAction(action: string) {
-  const normalized = action.trim().toLowerCase().replace(/[_-]+/g, ' ').replace(/\s+/g, ' ');
+  const normalized = action
+    .trim()
+    .toLowerCase()
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ");
   const aliases: Record<string, string> = {
-    'remote access': 'remote-access',
-    'remote assistance': 'remote-assistance',
-    'force all actions': 'force-all-actions',
-    'computer management': 'computer-management',
-    gpupdate: 'gpupdate',
-    'restart spooler': 'restart-spooler',
-    'renew ip': 'renew-ip',
-    'reconfigure ip': 'renew-ip',
-    'clear sccm cache': 'clear-sccm-cache',
-    'admin share': 'admin-share',
-    'create temp c share': 'create-temp-c-share',
-    'create-temp-c-share': 'create-temp-c-share',
-    'remove temp c share': 'remove-temp-c-share',
-    'remove-temp-c-share': 'remove-temp-c-share',
+    "remote access": "remote-access",
+    "remote assistance": "remote-assistance",
+    "force all actions": "force-all-actions",
+    "computer management": "computer-management",
+    gpupdate: "gpupdate",
+    "restart spooler": "restart-spooler",
+    "renew ip": "renew-ip",
+    "reconfigure ip": "renew-ip",
+    "clear sccm cache": "clear-sccm-cache",
+    "admin share": "admin-share",
+    "create temp c share": "create-temp-c-share",
+    "create-temp-c-share": "create-temp-c-share",
+    "remove temp c share": "remove-temp-c-share",
+    "remove-temp-c-share": "remove-temp-c-share",
   };
 
-  return aliases[normalized] || normalized.replace(/\s+/g, '-');
+  return aliases[normalized] || normalized.replace(/\s+/g, "-");
 }
 
 interface MaintenanceModeStatus {
@@ -399,15 +474,23 @@ async function openPathWithRetry(path: string, attempts = 12) {
     } catch (error) {
       lastError = error;
       if (attempt < attempts - 1) {
-        await new Promise((resolve) => window.setTimeout(resolve, 1500));
+        await new Promise(resolve => window.setTimeout(resolve, 1500));
       }
     }
   }
-  throw lastError instanceof Error ? lastError : new Error(`Nao foi possivel abrir ${path}`);
+  throw lastError instanceof Error
+    ? lastError
+    : new Error(`Nao foi possivel abrir ${path}`);
 }
 
-function CopyButton({ value, label }: { value?: string | number; label: string }) {
-  const copyValue = value ? String(value) : '';
+function CopyButton({
+  value,
+  label,
+}: {
+  value?: string | number;
+  label: string;
+}) {
+  const copyValue = value ? String(value) : "";
 
   if (!copyValue) {
     return null;
@@ -452,12 +535,20 @@ function CopyTicketButton({
       className="min-h-10 bg-background/80"
       onClick={async () => {
         try {
-          await navigator.clipboard.writeText(buildTicketSummary({ result, diagnostic, softwareCenter, activeUpdateJob, historyEvents }));
-          toast.success('Resumo copiado para o ticket', {
+          await navigator.clipboard.writeText(
+            buildTicketSummary({
+              result,
+              diagnostic,
+              softwareCenter,
+              activeUpdateJob,
+              historyEvents,
+            })
+          );
+          toast.success("Resumo copiado para o ticket", {
             description: result.hostname,
           });
         } catch {
-          toast.error('Não foi possível copiar o resumo para o ticket');
+          toast.error("Não foi possível copiar o resumo para o ticket");
         }
       }}
     >
@@ -470,7 +561,7 @@ function CopyTicketButton({
 function InfoTile({
   label,
   value,
-  className = '',
+  className = "",
   copyable = false,
 }: {
   label: string;
@@ -479,24 +570,38 @@ function InfoTile({
   copyable?: boolean;
 }) {
   return (
-    <div className={`min-w-0 rounded-lg bg-muted/35 px-4 py-3 ring-1 ring-border/40 ${className}`}>
+    <div
+      className={`min-w-0 rounded-lg bg-muted/35 px-4 py-3 ring-1 ring-border/40 ${className}`}
+    >
       <div className="flex min-w-0 items-center justify-between gap-2">
-        <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{label}</p>
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+          {label}
+        </p>
         {copyable && <CopyButton value={value} label={label} />}
       </div>
-      <p className="mt-2 min-h-5 break-words text-sm font-semibold leading-5 text-foreground">{value || 'N/A'}</p>
+      <p className="mt-2 min-h-5 break-words text-sm font-semibold leading-5 text-foreground">
+        {value || "N/A"}
+      </p>
     </div>
   );
 }
 
-function MessageBox({ tone, children }: { tone: 'success' | 'error'; children: React.ReactNode }) {
+function MessageBox({
+  tone,
+  children,
+}: {
+  tone: "success" | "error";
+  children: React.ReactNode;
+}) {
   const toneClass =
-    tone === 'success'
-      ? 'bg-emerald-50 text-emerald-700 ring-emerald-200 dark:bg-emerald-950/30 dark:text-emerald-300 dark:ring-emerald-900/50'
-      : 'bg-red-50 text-red-700 ring-red-200 dark:bg-red-950/30 dark:text-red-300 dark:ring-red-900/50';
+    tone === "success"
+      ? "bg-emerald-50 text-emerald-700 ring-emerald-200 dark:bg-emerald-950/30 dark:text-emerald-300 dark:ring-emerald-900/50"
+      : "bg-red-50 text-red-700 ring-red-200 dark:bg-red-950/30 dark:text-red-300 dark:ring-red-900/50";
 
   return (
-    <div className={`rounded-lg px-3 py-2 text-xs leading-5 ring-1 ${toneClass}`}>
+    <div
+      className={`rounded-lg px-3 py-2 text-xs leading-5 ring-1 ${toneClass}`}
+    >
       <p className="break-words">{children}</p>
     </div>
   );
@@ -504,9 +609,13 @@ function MessageBox({ tone, children }: { tone: 'success' | 'error'; children: R
 
 function OfflineInfoCard({ label, value }: { label: string; value?: string }) {
   return (
-    <div className="min-w-0 rounded-lg bg-slate-800/70 px-4 py-4 ring-1 ring-slate-700/60">
-      <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">{label}</p>
-      <p className="mt-3 min-h-5 break-words text-sm font-bold leading-5 text-slate-100">{value || 'N/A'}</p>
+    <div className="min-w-0 rounded-lg border border-border/70 bg-card px-4 py-4 shadow-sm">
+      <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+        {label}
+      </p>
+      <p className="mt-2 min-h-5 break-words text-sm font-semibold leading-5 text-foreground">
+        {value || "Não disponível"}
+      </p>
     </div>
   );
 }
@@ -514,51 +623,99 @@ function OfflineInfoCard({ label, value }: { label: string; value?: string }) {
 function OfflineComputerPanel({ result }: { result: LookupResult }) {
   const ad = result.active_directory || {};
   const adName = ad.name || result.hostname;
+  const isPrinter = result.device_type === "printer";
 
   return (
-    <section className="rounded-xl bg-slate-900/80 p-4 shadow-sm ring-1 ring-slate-700/70">
-      <div className="space-y-4">
-        <div>
-          <p className="text-sm text-red-300">Error</p>
-          <p className="mt-1 text-sm font-medium text-red-300">
-            {result.error || 'Host is offline or unreachable'}
-          </p>
+    <section className="overflow-hidden rounded-xl border border-red-500/25 bg-red-500/[0.04] shadow-sm">
+      <div className="flex flex-col gap-4 border-b border-red-500/20 bg-red-500/10 p-5 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex items-start gap-3">
+          <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-red-500/15 text-red-700 dark:text-red-300">
+            {isPrinter ? <Printer size={19} /> : <MonitorCog size={19} />}
+          </span>
+          <div>
+            <p className="text-sm font-semibold text-red-900 dark:text-red-100">
+              {isPrinter
+                ? "Impressora indisponível"
+                : "Equipamento indisponível"}
+            </p>
+            <p className="mt-1 text-sm text-red-800/80 dark:text-red-100/75">
+              {result.error ||
+                "O equipamento está desligado ou não pode ser alcançado pela rede."}
+            </p>
+          </div>
         </div>
+        <span className="w-fit rounded-full border border-red-500/30 bg-background/70 px-3 py-1 text-xs font-bold text-red-700 dark:text-red-300">
+          OFFLINE
+        </span>
+      </div>
 
-        <div className="grid gap-3 md:grid-cols-2">
-          <OfflineInfoCard label="AD Name" value={adName} />
-          <OfflineInfoCard label="Enabled" value={ad.enabled} />
-          <OfflineInfoCard label="Created" value={ad.created} />
-          <OfflineInfoCard label="Last Logon" value={ad.last_logon} />
-          <OfflineInfoCard label="Organization Unit" value={ad.organizational_unit} />
-        </div>
+      <div className="space-y-4 p-5">
+        {isPrinter ? (
+          <EmptyState
+            icon={Printer}
+            title="A impressora pertence ao range reservado"
+            description="O WMT manteve a classificação como impressora, mas não conseguiu obter dados de rede ou SNMP."
+            className="min-h-32 bg-card/70"
+          />
+        ) : (
+          <>
+            <SectionHeading
+              title="Últimas informações do Active Directory"
+              description="Esses dados podem ajudar a identificar o equipamento mesmo sem comunicação remota."
+            />
+            <div className="grid gap-3 md:grid-cols-2">
+              <OfflineInfoCard label="Nome no AD" value={adName} />
+              <OfflineInfoCard label="Conta habilitada" value={ad.enabled} />
+              <OfflineInfoCard label="Criado em" value={ad.created} />
+              <OfflineInfoCard label="Último logon" value={ad.last_logon} />
+              <OfflineInfoCard
+                label="Unidade organizacional"
+                value={ad.organizational_unit}
+              />
+            </div>
+          </>
+        )}
       </div>
     </section>
   );
 }
 
 function supplyTone(percent?: number | null) {
-  if (percent === null || percent === undefined) return 'bg-muted-foreground';
-  if (percent <= 10) return 'bg-red-500';
-  if (percent <= 25) return 'bg-amber-500';
-  return 'bg-emerald-500';
+  if (percent === null || percent === undefined) return "bg-muted-foreground";
+  if (percent <= 10) return "bg-red-500";
+  if (percent <= 25) return "bg-amber-500";
+  return "bg-emerald-500";
 }
 
-function DonutMetric({ value, label, helper }: { value: number; label: string; helper: string }) {
+function DonutMetric({
+  value,
+  label,
+  helper,
+}: {
+  value: number;
+  label: string;
+  helper: string;
+}) {
   const normalized = Math.max(0, Math.min(100, value));
   return (
     <div className="flex items-center gap-4 rounded-lg border border-border/70 bg-card/80 p-4">
       <div
         className="grid size-24 shrink-0 place-items-center rounded-full"
-        style={{ background: `conic-gradient(var(--primary) ${normalized * 3.6}deg, color-mix(in oklch, var(--muted) 78%, transparent) 0deg)` }}
+        style={{
+          background: `conic-gradient(var(--primary) ${normalized * 3.6}deg, color-mix(in oklch, var(--muted) 78%, transparent) 0deg)`,
+        }}
       >
         <div className="grid size-16 place-items-center rounded-full bg-card text-center shadow-sm">
-          <span className="text-lg font-bold text-foreground">{normalized}%</span>
+          <span className="text-lg font-bold text-foreground">
+            {normalized}%
+          </span>
         </div>
       </div>
       <div className="min-w-0">
         <p className="text-sm font-semibold text-foreground">{label}</p>
-        <p className="mt-1 break-words text-xs text-muted-foreground">{helper}</p>
+        <p className="mt-1 break-words text-xs text-muted-foreground">
+          {helper}
+        </p>
       </div>
     </div>
   );
@@ -566,20 +723,31 @@ function DonutMetric({ value, label, helper }: { value: number; label: string; h
 
 function PrinterDashboard({ result }: { result: LookupResult }) {
   const printer = result.printer || {};
+  const webHost = result.ip_address || result.hostname;
   const supplies = printer.supplies || [];
-  const knownSupplies = supplies.filter((item) => typeof item.percent === 'number');
+  const knownSupplies = supplies.filter(
+    item => typeof item.percent === "number"
+  );
   const averageSupply = knownSupplies.length
-    ? Math.round(knownSupplies.reduce((total, item) => total + Number(item.percent || 0), 0) / knownSupplies.length)
+    ? Math.round(
+        knownSupplies.reduce(
+          (total, item) => total + Number(item.percent || 0),
+          0
+        ) / knownSupplies.length
+      )
     : 0;
-  const lowSupplies = knownSupplies.filter((item) => Number(item.percent) <= 25).length;
+  const lowSupplies = knownSupplies.filter(
+    item => Number(item.percent) <= 25
+  ).length;
 
   return (
     <div className="space-y-4">
-      <section className="surface-hero overflow-hidden p-4">
+      <section className="relative overflow-hidden rounded-xl border border-cyan-500/25 bg-gradient-to-br from-cyan-500/12 via-card to-primary/8 p-5 shadow-md">
+        <div className="absolute inset-y-0 left-0 w-1 bg-cyan-500" />
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="inline-flex items-center gap-2 rounded-full border border-primary/25 bg-primary/10 px-3 py-1 text-xs font-bold text-primary">
+              <span className="inline-flex items-center gap-2 rounded-full border border-cyan-500/30 bg-cyan-500/10 px-3 py-1 text-xs font-bold text-cyan-700 dark:text-cyan-300">
                 <Printer size={14} />
                 IMPRESSORA
               </span>
@@ -587,56 +755,146 @@ function PrinterDashboard({ result }: { result: LookupResult }) {
                 ONLINE
               </span>
             </div>
-            <div className="mt-3 flex min-w-0 items-start gap-2">
-              <h2 className="min-w-0 break-words text-2xl font-bold leading-tight text-foreground">{printer.name || result.hostname}</h2>
-              <CopyButton value={printer.name || result.hostname} label="Impressora" />
+            <div className="mt-4 flex min-w-0 items-center gap-3">
+              <span className="flex size-12 shrink-0 items-center justify-center rounded-xl border border-cyan-500/20 bg-cyan-500/10 text-cyan-700 shadow-sm dark:text-cyan-300">
+                <Printer size={23} />
+              </span>
+              <div className="min-w-0">
+                <div className="flex min-w-0 items-start gap-2">
+                  <h2 className="min-w-0 break-words text-3xl font-bold leading-tight tracking-tight text-foreground">
+                    {printer.name || result.hostname}
+                  </h2>
+                  <CopyButton
+                    value={printer.name || result.hostname}
+                    label="Impressora"
+                  />
+                </div>
+                <p className="mt-1 break-words text-sm text-muted-foreground">
+                  {printer.model || "Modelo não retornado pelo SNMP"}
+                </p>
+              </div>
             </div>
-            <p className="mt-1 break-words text-sm text-muted-foreground">{printer.model || 'Modelo não retornado pelo SNMP'}</p>
           </div>
 
           <div className="grid min-w-0 gap-2 sm:grid-cols-3 lg:min-w-[460px]">
-            <InfoTile label="IP/Host" value={result.ip_address || result.hostname} copyable />
-            <InfoTile label="Serial" value={printer.serial_number || result.serial_number} copyable />
-            <InfoTile label="Local" value={printer.location || '—'} />
+            <InfoTile
+              label="IP/Host"
+              value={result.ip_address || result.hostname}
+              copyable
+            />
+            <InfoTile
+              label="Serial"
+              value={printer.serial_number || result.serial_number}
+              copyable
+            />
+            <InfoTile label="Local" value={printer.location || "—"} />
+            <Button
+              className="sm:col-span-3 sm:justify-self-end"
+              disabled={!webHost}
+              onClick={async () => {
+                try {
+                  await openWebUrl(`http://${webHost}`);
+                } catch (error) {
+                  toast.error("Não foi possível abrir a configuração web", {
+                    description:
+                      error instanceof Error ? error.message : webHost,
+                  });
+                }
+              }}
+            >
+              <ExternalLink size={16} />
+              Abrir no web
+            </Button>
           </div>
         </div>
       </section>
+
+      {(printer.detected === false || printer.error) && (
+        <div
+          role="status"
+          className="rounded-lg border border-amber-300 bg-amber-50 p-4 text-amber-900 dark:border-amber-400/30 dark:bg-amber-500/10 dark:text-amber-100"
+        >
+          <div className="flex items-start gap-3">
+            <ShieldAlert size={18} className="mt-0.5 shrink-0" />
+            <div>
+              <p className="text-sm font-semibold">
+                Impressora identificada pelo range de rede
+              </p>
+              <p className="mt-1 text-sm opacity-80">
+                {printer.error ||
+                  "O equipamento respondeu na rede, mas os detalhes SNMP não estão disponíveis."}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="grid gap-4 lg:grid-cols-[0.85fr_1.15fr]">
         <section className="grid gap-4">
           <DonutMetric
             value={averageSupply}
             label="Média dos suprimentos"
-            helper={knownSupplies.length ? `${knownSupplies.length} suprimento(s) com leitura SNMP` : 'Sem leitura percentual de suprimentos'}
+            helper={
+              knownSupplies.length
+                ? `${knownSupplies.length} suprimento(s) com leitura SNMP`
+                : "Sem leitura percentual de suprimentos"
+            }
           />
           <div className="grid gap-3 sm:grid-cols-2">
-            <InfoTile label="Contador" value={printer.page_count ? printer.page_count.toLocaleString('pt-BR') : '—'} />
+            <InfoTile
+              label="Contador"
+              value={
+                printer.page_count
+                  ? printer.page_count.toLocaleString("pt-BR")
+                  : "—"
+              }
+            />
             <InfoTile label="Baixos" value={`${lowSupplies} suprimento(s)`} />
-            <InfoTile label="Status SNMP" value={printer.status || '—'} />
-            <InfoTile label="Uptime" value={printer.uptime || '—'} />
+            <InfoTile label="Status SNMP" value={printer.status || "—"} />
+            <InfoTile label="Uptime" value={printer.uptime || "—"} />
           </div>
         </section>
 
         <section className="rounded-lg border border-border/70 bg-card/90 p-4 shadow-sm">
           <div className="mb-4 flex items-center gap-2">
             <Gauge size={17} className="text-primary" />
-            <h3 className="text-base font-semibold text-foreground">Suprimentos</h3>
+            <h3 className="text-base font-semibold text-foreground">
+              Suprimentos
+            </h3>
           </div>
           {supplies.length ? (
             <div className="space-y-3">
-              {supplies.map((supply) => {
-                const percent = typeof supply.percent === 'number' ? Math.max(0, Math.min(100, supply.percent)) : null;
+              {supplies.map(supply => {
+                const percent =
+                  typeof supply.percent === "number"
+                    ? Math.max(0, Math.min(100, supply.percent))
+                    : null;
                 return (
-                  <div key={`${supply.index}-${supply.description}`} className="rounded-lg border border-border/60 bg-background/50 p-3">
+                  <div
+                    key={`${supply.index}-${supply.description}`}
+                    className="rounded-lg border border-border/60 bg-background/50 p-3"
+                  >
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <p className="break-words text-sm font-semibold text-foreground">{supply.description || `Supply ${supply.index}`}</p>
-                        <p className="mt-0.5 text-xs text-muted-foreground">{supply.display_level || supply.level || 'Sem nível'}</p>
+                        <p className="break-words text-sm font-semibold text-foreground">
+                          {supply.description || `Supply ${supply.index}`}
+                        </p>
+                        <p className="mt-0.5 text-xs text-muted-foreground">
+                          {supply.display_level || supply.level || "Sem nível"}
+                        </p>
                       </div>
-                      <span className="shrink-0 text-sm font-bold text-foreground">{percent === null ? '—' : `${percent}%`}</span>
+                      <span className="shrink-0 text-sm font-bold text-foreground">
+                        {percent === null ? "—" : `${percent}%`}
+                      </span>
                     </div>
                     <div className="mt-3 h-2.5 overflow-hidden rounded-full bg-muted">
-                      <div className={`h-full transition-all ${supplyTone(percent)}`} style={{ width: `${percent ?? 100}%`, opacity: percent === null ? 0.35 : 1 }} />
+                      <div
+                        className={`h-full transition-all ${supplyTone(percent)}`}
+                        style={{
+                          width: `${percent ?? 100}%`,
+                          opacity: percent === null ? 0.35 : 1,
+                        }}
+                      />
                     </div>
                   </div>
                 );
@@ -681,14 +939,14 @@ function DiagnosticPanel({
   const cleanupPreview = inventory.cleanup_preview || {};
   const cleanup = inventory.cleanup || {};
   const inventoryWarnings = (inventory as { errors?: string[] }).errors || [];
-  const [softwareQuery, setSoftwareQuery] = useState('');
+  const [softwareQuery, setSoftwareQuery] = useState("");
   const normalizedSoftwareQuery = softwareQuery.trim().toLowerCase();
   const filteredSoftware = normalizedSoftwareQuery
-    ? software.filter((app) =>
+    ? software.filter(app =>
         [app.DisplayName, app.DisplayVersion, app.Publisher, app.InstallDate]
-          .map((value) => String(value || '').toLowerCase())
-          .join(' ')
-          .includes(normalizedSoftwareQuery),
+          .map(value => String(value || "").toLowerCase())
+          .join(" ")
+          .includes(normalizedSoftwareQuery)
       )
     : software;
   const visibleSoftware = filteredSoftware.slice(0, 80);
@@ -697,28 +955,58 @@ function DiagnosticPanel({
     <section className="space-y-4 rounded-xl bg-card p-4 shadow-sm ring-1 ring-border/40">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Diagnostic log</p>
-          <h3 className="mt-1 text-base font-semibold text-foreground">Pacote visual de diagnóstico</h3>
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+            Diagnóstico
+          </p>
+          <h3 className="mt-1 text-base font-semibold text-foreground">
+            Pacote visual de diagnóstico
+          </h3>
           <p className="mt-1 text-xs text-muted-foreground">
-            {data.generated_at ? `Gerado em ${data.generated_at}` : 'Coleta recente'}{data.duration_ms ? ` • ${(data.duration_ms / 1000).toFixed(1)}s` : ''}
+            {data.generated_at
+              ? `Gerado em ${data.generated_at}`
+              : "Coleta recente"}
+            {data.duration_ms
+              ? ` • ${(data.duration_ms / 1000).toFixed(1)}s`
+              : ""}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Button variant="outline" size="sm" disabled={refreshing} onClick={onRefresh}>
-            <PackageSearch size={16} className={refreshing ? 'mr-2 animate-pulse' : 'mr-2'} />
-            {refreshing ? 'Consultando...' : 'Inventário detalhado'}
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={refreshing}
+            onClick={onRefresh}
+          >
+            <PackageSearch
+              size={16}
+              className={refreshing ? "mr-2 animate-pulse" : "mr-2"}
+            />
+            {refreshing ? "Consultando..." : "Inventário detalhado"}
           </Button>
-          <Button variant="outline" size="sm" disabled={cleaning} onClick={onCleanup}>
-            {cleaning ? <Loader2 size={16} className="mr-2 animate-spin" /> : <Wrench size={16} className="mr-2" />}
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={cleaning}
+            onClick={onCleanup}
+          >
+            {cleaning ? (
+              <Loader2 size={16} className="mr-2 animate-spin" />
+            ) : (
+              <Wrench size={16} className="mr-2" />
+            )}
             Limpeza
           </Button>
-          <span className="w-fit rounded-full border border-border/70 px-3 py-1 text-xs font-semibold text-muted-foreground">{data.host}</span>
+          <span className="w-fit rounded-full border border-border/70 px-3 py-1 text-xs font-semibold text-muted-foreground">
+            {data.host}
+          </span>
         </div>
       </div>
 
       {data.error && <MessageBox tone="error">{data.error}</MessageBox>}
       {inventoryWarnings.length > 0 && (
-        <MessageBox tone="error">{inventoryWarnings.slice(0, 2).join(' | ')}</MessageBox>
+        <MessageBox tone="error">
+          {inventoryWarnings.slice(0, 2).join(" | ")}
+        </MessageBox>
       )}
 
       <div className="grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
@@ -729,42 +1017,88 @@ function DiagnosticPanel({
               <p className="text-sm font-semibold text-foreground">Sistema</p>
             </div>
             <div className="grid gap-2 text-xs text-muted-foreground">
-              <p><span className="font-semibold text-foreground">Windows:</span> {String(os.caption || '—')}</p>
-              <p><span className="font-semibold text-foreground">Versão:</span> {String(os.version || '—')} build {String(os.build || '—')}</p>
-              <p><span className="font-semibold text-foreground">Uptime:</span> {String(os.uptime_hours || '—')}h</p>
-              <p><span className="font-semibold text-foreground">Usuário:</span> {String(computer.logged_user || '—')}</p>
+              <p>
+                <span className="font-semibold text-foreground">Windows:</span>{" "}
+                {String(os.caption || "—")}
+              </p>
+              <p>
+                <span className="font-semibold text-foreground">Versão:</span>{" "}
+                {String(os.version || "—")} build {String(os.build || "—")}
+              </p>
+              <p>
+                <span className="font-semibold text-foreground">Uptime:</span>{" "}
+                {String(os.uptime_hours || "—")}h
+              </p>
+              <p>
+                <span className="font-semibold text-foreground">Usuário:</span>{" "}
+                {String(computer.logged_user || "—")}
+              </p>
             </div>
           </div>
 
           <div className="rounded-lg bg-muted/30 p-3 ring-1 ring-border/40">
             <div className="mb-3 flex items-center gap-2">
               <HardDrive size={16} className="text-muted-foreground" />
-              <p className="text-sm font-semibold text-foreground">Discos e BitLocker</p>
+              <p className="text-sm font-semibold text-foreground">
+                Discos e BitLocker
+              </p>
             </div>
             <div className="space-y-2">
-              {disks.length ? disks.map((disk, index) => (
-                <div key={`${String(disk.DeviceID)}-${index}`} className="rounded-md bg-background px-3 py-2 text-xs ring-1 ring-border/40">
-                  <p className="font-semibold text-foreground">{String(disk.DeviceID || 'Disco')}</p>
-                  <p className="text-muted-foreground">{String(disk.FreeGB || 0)} GB livres de {String(disk.SizeGB || 0)} GB</p>
-                </div>
-              )) : <p className="text-xs text-muted-foreground">Nenhum disco retornado.</p>}
-              {bitlocker.length ? bitlocker.map((item, index) => (
-                <div key={`${String(item.MountPoint)}-${index}`} className="rounded-md bg-background px-3 py-2 text-xs ring-1 ring-border/40">
-                  <p className="font-semibold text-foreground">{String(item.MountPoint || 'Volume')}</p>
-                  <p className="text-muted-foreground">Status: {String(item.VolumeStatus || '—')} • Proteção: {String(item.ProtectionStatus || '—')}</p>
-                </div>
-              )) : <p className="text-xs text-muted-foreground">BitLocker não retornou volumes.</p>}
+              {disks.length ? (
+                disks.map((disk, index) => (
+                  <div
+                    key={`${String(disk.DeviceID)}-${index}`}
+                    className="rounded-md bg-background px-3 py-2 text-xs ring-1 ring-border/40"
+                  >
+                    <p className="font-semibold text-foreground">
+                      {String(disk.DeviceID || "Disco")}
+                    </p>
+                    <p className="text-muted-foreground">
+                      {String(disk.FreeGB || 0)} GB livres de{" "}
+                      {String(disk.SizeGB || 0)} GB
+                    </p>
+                  </div>
+                ))
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  Nenhum disco retornado.
+                </p>
+              )}
+              {bitlocker.length ? (
+                bitlocker.map((item, index) => (
+                  <div
+                    key={`${String(item.MountPoint)}-${index}`}
+                    className="rounded-md bg-background px-3 py-2 text-xs ring-1 ring-border/40"
+                  >
+                    <p className="font-semibold text-foreground">
+                      {String(item.MountPoint || "Volume")}
+                    </p>
+                    <p className="text-muted-foreground">
+                      Status: {String(item.VolumeStatus || "—")} • Proteção:{" "}
+                      {String(item.ProtectionStatus || "—")}
+                    </p>
+                  </div>
+                ))
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  BitLocker não retornou volumes.
+                </p>
+              )}
             </div>
           </div>
 
           <div className="rounded-lg bg-muted/30 p-3 ring-1 ring-border/40">
             <div className="mb-3 min-w-0">
-              <h4 className="text-sm font-semibold text-foreground">Quick Actions</h4>
-              <p className="mt-1 break-words text-xs text-muted-foreground">Operações frequentes para conexão e suporte.</p>
+              <h4 className="text-sm font-semibold text-foreground">
+                Ações rápidas
+              </h4>
+              <p className="mt-1 break-words text-xs text-muted-foreground">
+                Operações frequentes para conexão e suporte.
+              </p>
             </div>
 
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-              {quickActions.map((item) => (
+              {quickActions.map(item => (
                 <Button
                   key={item.key}
                   variant="outline"
@@ -772,7 +1106,9 @@ function DiagnosticPanel({
                   className="min-h-10 whitespace-normal rounded-lg border-border/80 bg-background/90 px-3 py-2 text-center text-xs font-semibold leading-5 shadow-sm hover:bg-accent/50"
                   onClick={() => onRemoteAction(item.key)}
                 >
-                  {remoteActionLoading === item.key ? 'Enviando...' : item.label}
+                  {remoteActionLoading === item.key
+                    ? "Enviando..."
+                    : item.label}
                 </Button>
               ))}
             </div>
@@ -784,9 +1120,13 @@ function DiagnosticPanel({
             <div className="mb-3 flex flex-col gap-3">
               <div className="flex items-center gap-2">
                 <PackageSearch size={16} className="text-muted-foreground" />
-                <p className="text-sm font-semibold text-foreground">Softwares instalados</p>
+                <p className="text-sm font-semibold text-foreground">
+                  Softwares instalados
+                </p>
                 <span className="rounded-full bg-background px-2 py-0.5 text-xs text-muted-foreground ring-1 ring-border/40">
-                  {normalizedSoftwareQuery ? `${filteredSoftware.length}/${software.length}` : software.length}
+                  {normalizedSoftwareQuery
+                    ? `${filteredSoftware.length}/${software.length}`
+                    : software.length}
                 </span>
               </div>
               {software.length > 0 && (
@@ -794,7 +1134,7 @@ function DiagnosticPanel({
                   <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
                   <Input
                     value={softwareQuery}
-                    onChange={(event) => setSoftwareQuery(event.target.value)}
+                    onChange={event => setSoftwareQuery(event.target.value)}
                     placeholder="Pesquisar aplicativo ou versão"
                     className="h-9 bg-background pl-9 text-sm"
                   />
@@ -809,24 +1149,39 @@ function DiagnosticPanel({
                     Consultando softwares instalados...
                   </div>
                   <div className="space-y-2">
-                    {[0, 1, 2].map((item) => (
-                      <div key={item} className="h-8 animate-pulse rounded-md bg-muted/60" />
+                    {[0, 1, 2].map(item => (
+                      <div
+                        key={item}
+                        className="h-8 animate-pulse rounded-md bg-muted/60"
+                      />
                     ))}
                   </div>
                 </div>
-              ) : visibleSoftware.length ? visibleSoftware.map((app, index) => (
-                <div key={`${String(app.DisplayName)}-${index}`} className="grid grid-cols-[minmax(0,1fr)_110px] gap-2 border-b px-3 py-2 text-xs last:border-0">
-                  <span className="truncate font-medium text-foreground">{String(app.DisplayName || '—')}</span>
-                  <span className="truncate text-right text-muted-foreground">{String(app.DisplayVersion || '—')}</span>
-                </div>
-              )) : software.length ? (
+              ) : visibleSoftware.length ? (
+                visibleSoftware.map((app, index) => (
+                  <div
+                    key={`${String(app.DisplayName)}-${index}`}
+                    className="grid grid-cols-[minmax(0,1fr)_110px] gap-2 border-b px-3 py-2 text-xs last:border-0"
+                  >
+                    <span className="truncate font-medium text-foreground">
+                      {String(app.DisplayName || "—")}
+                    </span>
+                    <span className="truncate text-right text-muted-foreground">
+                      {String(app.DisplayVersion || "—")}
+                    </span>
+                  </div>
+                ))
+              ) : software.length ? (
                 <div className="p-3 text-xs text-muted-foreground">
                   Nenhum aplicativo encontrado para "{softwareQuery.trim()}".
                 </div>
               ) : (
                 <div className="p-3 text-xs text-muted-foreground">
                   <p>Softwares não são carregados na coleta rápida.</p>
-                  <p className="mt-1">Clique em Inventário detalhado para consultar programas instalados.</p>
+                  <p className="mt-1">
+                    Clique em Inventário detalhado para consultar programas
+                    instalados.
+                  </p>
                 </div>
               )}
             </div>
@@ -834,8 +1189,17 @@ function DiagnosticPanel({
 
           <div className="rounded-lg bg-muted/30 p-3 ring-1 ring-border/40">
             <div className="mb-3 flex items-center gap-2">
-              {cleaning ? <Loader2 size={16} className="animate-spin text-muted-foreground" /> : <Sparkles size={16} className="text-muted-foreground" />}
-              <p className="text-sm font-semibold text-foreground">Limpeza rápida</p>
+              {cleaning ? (
+                <Loader2
+                  size={16}
+                  className="animate-spin text-muted-foreground"
+                />
+              ) : (
+                <Sparkles size={16} className="text-muted-foreground" />
+              )}
+              <p className="text-sm font-semibold text-foreground">
+                Limpeza rápida
+              </p>
             </div>
             <div className="grid gap-2 md:grid-cols-2">
               {cleaning && (
@@ -845,27 +1209,51 @@ function DiagnosticPanel({
                     Calculando e executando limpeza...
                   </div>
                   <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                    {[0, 1].map((item) => (
-                      <div key={item} className="h-10 animate-pulse rounded-md bg-muted/60" />
+                    {[0, 1].map(item => (
+                      <div
+                        key={item}
+                        className="h-10 animate-pulse rounded-md bg-muted/60"
+                      />
                     ))}
                   </div>
                 </div>
               )}
-              {Object.entries(cleanupPreview).slice(0, 8).map(([path, info]) => (
-                <div key={path} className="min-w-0 rounded-md bg-background px-3 py-2 text-xs ring-1 ring-border/40">
-                  <p className="truncate font-semibold text-foreground" title={path}>{path}</p>
-                  <p className="text-muted-foreground">{info.error || `${info.items || 0} item(s), ${info.size_mb || 0} MB`}</p>
-                </div>
-              ))}
+              {Object.entries(cleanupPreview)
+                .slice(0, 8)
+                .map(([path, info]) => (
+                  <div
+                    key={path}
+                    className="min-w-0 rounded-md bg-background px-3 py-2 text-xs ring-1 ring-border/40"
+                  >
+                    <p
+                      className="truncate font-semibold text-foreground"
+                      title={path}
+                    >
+                      {path}
+                    </p>
+                    <p className="text-muted-foreground">
+                      {info.error ||
+                        `${info.items || 0} item(s), ${info.size_mb || 0} MB`}
+                    </p>
+                  </div>
+                ))}
               {Object.entries(cleanup).map(([path, status]) => (
-                <div key={`cleanup-${path}`} className="min-w-0 rounded-md bg-emerald-500/10 px-3 py-2 text-xs text-emerald-700 ring-1 ring-emerald-500/30 dark:text-emerald-300">
-                  <p className="truncate font-semibold" title={path}>{path}</p>
+                <div
+                  key={`cleanup-${path}`}
+                  className="min-w-0 rounded-md bg-emerald-500/10 px-3 py-2 text-xs text-emerald-700 ring-1 ring-emerald-500/30 dark:text-emerald-300"
+                >
+                  <p className="truncate font-semibold" title={path}>
+                    {path}
+                  </p>
                   <p>{status}</p>
                 </div>
               ))}
-              {!Object.keys(cleanupPreview).length && !Object.keys(cleanup).length && (
-                <p className="text-xs text-muted-foreground">A prévia de limpeza é calculada ao clicar em Limpeza.</p>
-              )}
+              {!Object.keys(cleanupPreview).length &&
+                !Object.keys(cleanup).length && (
+                  <p className="text-xs text-muted-foreground">
+                    A prévia de limpeza é calculada ao clicar em Limpeza.
+                  </p>
+                )}
             </div>
           </div>
         </div>
@@ -875,38 +1263,62 @@ function DiagnosticPanel({
 }
 
 export default function Monitor() {
-  const { user, logout, loading: authLoading } = useAuth();
+  const user = useAuthenticatedUser();
   const [location, navigate] = useLocation();
-  const [lookupHost, setLookupHost] = useState(() => localStorage.getItem(LAST_MONITOR_HOST_KEY) || '');
+  const [lookupHost, setLookupHost] = useState(
+    () => localStorage.getItem(LAST_MONITOR_HOST_KEY) || ""
+  );
   const [lookupResult, setLookupResult] = useState<LookupResult | null>(null);
   const [lookupLoading, setLookupLoading] = useState(false);
   const [lookupLoadingStep, setLookupLoadingStep] = useState(0);
   const [lookupError, setLookupError] = useState<string | null>(null);
   const [lookupDuration, setLookupDuration] = useState<number | null>(null);
   const [recentLookups, setRecentLookups] = useState<RecentLookup[]>([]);
-  const [remoteActionLoading, setRemoteActionLoading] = useState<string | null>(null);
-  const [remoteActionMessage, setRemoteActionMessage] = useState<string | null>(null);
-  const [remoteActionDetails, setRemoteActionDetails] = useState<string | null>(null);
-  const [remoteActionError, setRemoteActionError] = useState<string | null>(null);
-  const [maintenanceStatus, setMaintenanceStatus] = useState<MaintenanceModeStatus | null>(null);
+  const [remoteActionLoading, setRemoteActionLoading] = useState<string | null>(
+    null
+  );
+  const [remoteActionMessage, setRemoteActionMessage] = useState<string | null>(
+    null
+  );
+  const [remoteActionDetails, setRemoteActionDetails] = useState<string | null>(
+    null
+  );
+  const [remoteActionError, setRemoteActionError] = useState<string | null>(
+    null
+  );
+  const [maintenanceStatus, setMaintenanceStatus] =
+    useState<MaintenanceModeStatus | null>(null);
   const [maintenanceLoading, setMaintenanceLoading] = useState(false);
   const [maintenanceDialogOpen, setMaintenanceDialogOpen] = useState(false);
-  const [maintenanceContact, setMaintenanceContact] = useState('Service Desk');
-  const [maintenanceTicket, setMaintenanceTicket] = useState('');
-  const [maintenanceReason, setMaintenanceReason] = useState('');
+  const [maintenanceContact, setMaintenanceContact] = useState("Service Desk");
+  const [maintenanceTicket, setMaintenanceTicket] = useState("");
+  const [maintenanceReason, setMaintenanceReason] = useState("");
   const [maintenanceDuration, setMaintenanceDuration] = useState(60);
-  const [softwareCenter, setSoftwareCenter] = useState<SoftwareCenterStatus | null>(null);
+  const [softwareCenter, setSoftwareCenter] =
+    useState<SoftwareCenterStatus | null>(null);
   const [softwareCenterLoading, setSoftwareCenterLoading] = useState(false);
-  const [softwareCenterInstalling, setSoftwareCenterInstalling] = useState(false);
-  const [softwareCenterMonitoring, setSoftwareCenterMonitoring] = useState(false);
-  const [softwareCenterMonitorHost, setSoftwareCenterMonitorHost] = useState<string | null>(null);
-  const [activeUpdateJob, setActiveUpdateJob] = useState<UpdateJob | null>(null);
-  const [softwareCenterMessage, setSoftwareCenterMessage] = useState<string | null>(null);
-  const [softwareCenterError, setSoftwareCenterError] = useState<string | null>(null);
+  const [softwareCenterInstalling, setSoftwareCenterInstalling] =
+    useState(false);
+  const [softwareCenterMonitoring, setSoftwareCenterMonitoring] =
+    useState(false);
+  const [softwareCenterMonitorHost, setSoftwareCenterMonitorHost] = useState<
+    string | null
+  >(null);
+  const [activeUpdateJob, setActiveUpdateJob] = useState<UpdateJob | null>(
+    null
+  );
+  const [softwareCenterMessage, setSoftwareCenterMessage] = useState<
+    string | null
+  >(null);
+  const [softwareCenterError, setSoftwareCenterError] = useState<string | null>(
+    null
+  );
   const [diagnostic, setDiagnostic] = useState<DiagnosticData | null>(null);
   const [diagnosticLoading, setDiagnosticLoading] = useState(false);
   const [cleanupLoading, setCleanupLoading] = useState(false);
-  const [hostHistory, setHostHistory] = useState<WorkstationHistoryData | null>(null);
+  const [hostHistory, setHostHistory] = useState<WorkstationHistoryData | null>(
+    null
+  );
   const [hostHistoryLoading, setHostHistoryLoading] = useState(false);
   const [hostHistoryError, setHostHistoryError] = useState<string | null>(null);
   const softwareCenterPollInFlight = useRef(false);
@@ -914,17 +1326,15 @@ export default function Monitor() {
   const autoLookupHostRef = useRef<string | null>(null);
   const diagnosticRequestRef = useRef(0);
 
-  const handleLogout = async () => {
-    await logout();
-    navigate('/login');
-  };
-
-  const selectedHost = lookupResult?.hostname || lookupHost.trim() || 'localhost';
-  const canRunHostActions = user?.role === 'admin' || user?.role === 'operator';
+  const selectedHost =
+    lookupResult?.hostname || lookupHost.trim() || "localhost";
+  const canRunHostActions = user?.role === "admin" || user?.role === "operator";
 
   const loadMaintenanceStatus = async (host: string) => {
     try {
-      const status = await apiRequest<MaintenanceModeStatus>(`/api/maintenance-mode?host=${encodeURIComponent(host)}`);
+      const status = await apiRequest<MaintenanceModeStatus>(
+        `/api/maintenance-mode?host=${encodeURIComponent(host)}`
+      );
       setMaintenanceStatus(status);
       if (status.contact) setMaintenanceContact(status.contact);
       if (status.ticket) setMaintenanceTicket(status.ticket);
@@ -936,31 +1346,44 @@ export default function Monitor() {
     }
   };
 
-  const changeMaintenanceMode = async (action: 'enable' | 'disable') => {
+  const changeMaintenanceMode = async (action: "enable" | "disable") => {
     setMaintenanceLoading(true);
     try {
-      const status = await apiRequest<MaintenanceModeStatus>('/api/maintenance-mode', {
-        method: 'POST',
-        body: JSON.stringify({
-          host: selectedHost,
-          action,
-          contact: maintenanceContact.trim() || 'Service Desk',
-          ticket: maintenanceTicket.trim(),
-          reason: maintenanceReason.trim(),
-          duration_minutes: maintenanceDuration,
-          target_user: lookupResult?.current_user || '',
-        }),
-      });
+      const status = await apiRequest<MaintenanceModeStatus>(
+        "/api/maintenance-mode",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            host: selectedHost,
+            action,
+            contact: maintenanceContact.trim() || "Service Desk",
+            ticket: maintenanceTicket.trim(),
+            reason: maintenanceReason.trim(),
+            duration_minutes: maintenanceDuration,
+            target_user: lookupResult?.current_user || "",
+          }),
+        }
+      );
       setMaintenanceStatus(status);
       setMaintenanceDialogOpen(false);
-      toast.success(action === 'enable' ? 'Modo manutenção ativado' : 'Modo manutenção removido', {
-        description: selectedHost,
-      });
+      toast.success(
+        action === "enable"
+          ? "Modo manutenção ativado"
+          : "Modo manutenção removido",
+        {
+          description: selectedHost,
+        }
+      );
       void loadHostHistory(selectedHost);
     } catch (err) {
-      toast.error(action === 'enable' ? 'Falha ao ativar o modo manutenção' : 'Falha ao remover o modo manutenção', {
-        description: err instanceof Error ? err.message : selectedHost,
-      });
+      toast.error(
+        action === "enable"
+          ? "Falha ao ativar o modo manutenção"
+          : "Falha ao remover o modo manutenção",
+        {
+          description: err instanceof Error ? err.message : selectedHost,
+        }
+      );
     } finally {
       setMaintenanceLoading(false);
     }
@@ -973,7 +1396,9 @@ export default function Monitor() {
     }
 
     const interval = window.setInterval(() => {
-      setLookupLoadingStep((current) => (current + 1) % lookupLoadingMessages.length);
+      setLookupLoadingStep(
+        current => (current + 1) % lookupLoadingMessages.length
+      );
     }, 1800);
 
     return () => window.clearInterval(interval);
@@ -981,22 +1406,31 @@ export default function Monitor() {
 
   const rememberLookup = (result: LookupResult) => {
     const host = (result.hostname || lookupHost.trim()).toUpperCase();
+    const deviceType: RecentLookup["deviceType"] =
+      result.device_type === "printer" ? "printer" : "workstation";
 
-    setRecentLookups((items) => {
+    setRecentLookups(items => {
       const next = [
         {
           host,
           online: result.online,
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          deviceType,
+          timestamp: new Date().toLocaleTimeString([], {
+            hour: "2-digit",
+            minute: "2-digit",
+          }),
         },
-        ...items.filter((item) => item.host !== host),
+        ...items.filter(item => item.host !== host),
       ];
 
       return next.slice(0, 6);
     });
   };
 
-  const loadSoftwareCenter = async (host: string, options: { silent?: boolean } = {}) => {
+  const loadSoftwareCenter = async (
+    host: string,
+    options: { silent?: boolean } = {}
+  ) => {
     if (!options.silent) {
       setSoftwareCenterLoading(true);
       setSoftwareCenterMessage(null);
@@ -1004,7 +1438,9 @@ export default function Monitor() {
     }
 
     try {
-      const result = await apiRequest<SoftwareCenterStatus>(`/api/software-center?host=${encodeURIComponent(host)}`);
+      const result = await apiRequest<SoftwareCenterStatus>(
+        `/api/software-center?host=${encodeURIComponent(host)}`
+      );
       setSoftwareCenter(result);
       if (result.ok === false && result.message) {
         setSoftwareCenterError(result.message);
@@ -1014,7 +1450,11 @@ export default function Monitor() {
       return result;
     } catch (err) {
       setSoftwareCenter(null);
-      setSoftwareCenterError(err instanceof Error ? err.message : 'Erro desconhecido ao consultar o Software Center.');
+      setSoftwareCenterError(
+        err instanceof Error
+          ? err.message
+          : "Erro desconhecido ao consultar o Software Center."
+      );
       return null;
     } finally {
       if (!options.silent) {
@@ -1038,7 +1478,9 @@ export default function Monitor() {
 
       softwareCenterPollInFlight.current = true;
       try {
-        const result = await loadSoftwareCenter(softwareCenterMonitorHost, { silent: true });
+        const result = await loadSoftwareCenter(softwareCenterMonitorHost, {
+          silent: true,
+        });
         if (!result || result.ok === false) {
           setSoftwareCenterMonitoring(false);
           return;
@@ -1046,14 +1488,19 @@ export default function Monitor() {
 
         if ((result.pendingUpdates ?? 0) === 0) {
           setSoftwareCenterMonitoring(false);
-          setSoftwareCenterMessage('Atualizações concluídas ou sem pendências para este host.');
+          setSoftwareCenterMessage(
+            "Atualizações concluídas ou sem pendências para este host."
+          );
         }
       } finally {
         softwareCenterPollInFlight.current = false;
       }
     };
 
-    const intervalId = window.setInterval(pollSoftwareCenter, SOFTWARE_CENTER_POLL_INTERVAL_MS);
+    const intervalId = window.setInterval(
+      pollSoftwareCenter,
+      SOFTWARE_CENTER_POLL_INTERVAL_MS
+    );
     void pollSoftwareCenter();
 
     return () => {
@@ -1062,7 +1509,10 @@ export default function Monitor() {
   }, [softwareCenterMonitoring, softwareCenterMonitorHost]);
 
   useEffect(() => {
-    if (!activeUpdateJob || !['queued', 'running'].includes(activeUpdateJob.status)) {
+    if (
+      !activeUpdateJob ||
+      !["queued", "running"].includes(activeUpdateJob.status)
+    ) {
       return;
     }
 
@@ -1071,21 +1521,31 @@ export default function Monitor() {
         return;
       }
       try {
-        const job = await apiRequest<UpdateJob>(`/api/update-jobs/${encodeURIComponent(activeUpdateJob.id)}`);
+        const job = await apiRequest<UpdateJob>(
+          `/api/update-jobs/${encodeURIComponent(activeUpdateJob.id)}`
+        );
         updateJobPollFailures.current = 0;
         setActiveUpdateJob(job);
-        if (!['queued', 'running'].includes(job.status)) {
+        if (!["queued", "running"].includes(job.status)) {
           setSoftwareCenterMonitoring(false);
           await loadSoftwareCenter(job.host || selectedHost, { silent: true });
-          if (job.status === 'completed') {
-            setSoftwareCenterMessage(job.message || `Update job ${job.id} concluído.`);
-          } else if (job.status === 'failed') {
-            setSoftwareCenterError(job.message || `Update job ${job.id} falhou.`);
+          if (job.status === "completed") {
+            setSoftwareCenterMessage(
+              job.message || `Update job ${job.id} concluído.`
+            );
+          } else if (job.status === "failed") {
+            setSoftwareCenterError(
+              job.message || `Update job ${job.id} falhou.`
+            );
           }
         }
       } catch (err) {
         updateJobPollFailures.current += 1;
-        setSoftwareCenterError(err instanceof Error ? err.message : 'Erro desconhecido ao consultar update job.');
+        setSoftwareCenterError(
+          err instanceof Error
+            ? err.message
+            : "Erro desconhecido ao consultar update job."
+        );
         if (updateJobPollFailures.current >= 3) {
           setActiveUpdateJob(null);
           setSoftwareCenterMonitoring(false);
@@ -1097,7 +1557,10 @@ export default function Monitor() {
   }, [activeUpdateJob, selectedHost]);
 
   useEffect(() => {
-    if (softwareCenterMonitorHost && softwareCenterMonitorHost !== selectedHost) {
+    if (
+      softwareCenterMonitorHost &&
+      softwareCenterMonitorHost !== selectedHost
+    ) {
       setSoftwareCenterMonitoring(false);
       setSoftwareCenterMonitorHost(null);
     }
@@ -1111,14 +1574,14 @@ export default function Monitor() {
     diagnosticRequestRef.current = requestId;
     setDiagnosticLoading(true);
     try {
-      const job = await apiRequest<DiagnosticJob>('/api/diagnostics/jobs', {
-        method: 'POST',
+      const job = await apiRequest<DiagnosticJob>("/api/diagnostics/jobs", {
+        method: "POST",
         body: JSON.stringify({ host, detailed }),
       });
       if (diagnosticRequestRef.current !== requestId) {
         return;
       }
-      if (job.status === 'completed' && job.payload) {
+      if (job.status === "completed" && job.payload) {
         setDiagnostic(job.payload);
         return;
       }
@@ -1126,30 +1589,38 @@ export default function Monitor() {
       const startedAt = Date.now();
       let currentJob = job;
       while (Date.now() - startedAt < 120000) {
-        await new Promise((resolve) => window.setTimeout(resolve, 900));
-        currentJob = await apiRequest<DiagnosticJob>(`/api/diagnostics/jobs/${encodeURIComponent(job.id)}`);
+        await new Promise(resolve => window.setTimeout(resolve, 900));
+        currentJob = await apiRequest<DiagnosticJob>(
+          `/api/diagnostics/jobs/${encodeURIComponent(job.id)}`
+        );
         if (diagnosticRequestRef.current !== requestId) {
           return;
         }
-        if (!['queued', 'running'].includes(currentJob.status)) {
+        if (!["queued", "running"].includes(currentJob.status)) {
           break;
         }
       }
 
-      if (currentJob.status === 'completed' && currentJob.payload) {
+      if (currentJob.status === "completed" && currentJob.payload) {
         setDiagnostic(currentJob.payload);
       } else {
         setDiagnostic({
           host,
           checks: [],
-          error: currentJob.error || currentJob.message || 'Diagnóstico não concluiu dentro do tempo esperado.',
+          error:
+            currentJob.error ||
+            currentJob.message ||
+            "Diagnóstico não concluiu dentro do tempo esperado.",
         });
       }
     } catch (err) {
       setDiagnostic({
         host,
         checks: [],
-        error: err instanceof Error ? err.message : 'Erro desconhecido ao gerar diagnóstico.',
+        error:
+          err instanceof Error
+            ? err.message
+            : "Erro desconhecido ao gerar diagnóstico.",
       });
     } finally {
       if (diagnosticRequestRef.current === requestId) {
@@ -1165,11 +1636,17 @@ export default function Monitor() {
     setHostHistoryLoading(true);
     setHostHistoryError(null);
     try {
-      const result = await apiRequest<WorkstationHistoryData>(`/api/workstations/${encodeURIComponent(host)}/history`);
+      const result = await apiRequest<WorkstationHistoryData>(
+        `/api/workstations/${encodeURIComponent(host)}/history`
+      );
       setHostHistory(result);
     } catch (err) {
       setHostHistory(null);
-      setHostHistoryError(err instanceof Error ? err.message : 'Erro desconhecido ao consultar histórico do host.');
+      setHostHistoryError(
+        err instanceof Error
+          ? err.message
+          : "Erro desconhecido ao consultar histórico do host."
+      );
     } finally {
       setHostHistoryLoading(false);
     }
@@ -1177,19 +1654,19 @@ export default function Monitor() {
 
   const runQuickCleanup = async () => {
     if (!canRunHostActions) {
-      toast.error('Sem permissão para executar limpeza rápida.');
+      toast.error("Sem permissão para executar limpeza rápida.");
       return;
     }
     setCleanupLoading(true);
     try {
-      const result = await apiRequest<DiagnosticData>('/api/quick-cleanup', {
-        method: 'POST',
+      const result = await apiRequest<DiagnosticData>("/api/quick-cleanup", {
+        method: "POST",
         body: JSON.stringify({ host: selectedHost }),
       });
       setDiagnostic(result);
-      toast.success('Limpeza rápida solicitada', { description: selectedHost });
+      toast.success("Limpeza rápida solicitada", { description: selectedHost });
     } catch (err) {
-      toast.error('Falha na limpeza rápida', {
+      toast.error("Falha na limpeza rápida", {
         description: err instanceof Error ? err.message : selectedHost,
       });
     } finally {
@@ -1199,7 +1676,7 @@ export default function Monitor() {
 
   const handleInstallSoftwareCenterUpdates = async () => {
     if (!canRunHostActions) {
-      setSoftwareCenterError('Sem permissão para iniciar updates neste host.');
+      setSoftwareCenterError("Sem permissão para iniciar updates neste host.");
       return;
     }
     setSoftwareCenterInstalling(true);
@@ -1207,8 +1684,13 @@ export default function Monitor() {
     setSoftwareCenterError(null);
 
     try {
-      const result = await apiRequest<{ ok: boolean; message?: string; job?: UpdateJob; job_id?: string }>('/api/software-center/install', {
-        method: 'POST',
+      const result = await apiRequest<{
+        ok: boolean;
+        message?: string;
+        job?: UpdateJob;
+        job_id?: string;
+      }>("/api/software-center/install", {
+        method: "POST",
         body: JSON.stringify({ host: selectedHost }),
       });
 
@@ -1216,7 +1698,9 @@ export default function Monitor() {
         await loadSoftwareCenter(selectedHost);
         setSoftwareCenterMonitoring(false);
         setSoftwareCenterMonitorHost(null);
-        setSoftwareCenterError(result.message || 'Falha ao iniciar atualizações do Software Center.');
+        setSoftwareCenterError(
+          result.message || "Falha ao iniciar atualizações do Software Center."
+        );
       } else {
         await loadSoftwareCenter(selectedHost);
         if (result.job) {
@@ -1224,10 +1708,16 @@ export default function Monitor() {
         }
         setSoftwareCenterMonitorHost(selectedHost);
         setSoftwareCenterMonitoring(false);
-        setSoftwareCenterMessage(result.message || 'Atualizações do Software Center iniciadas.');
+        setSoftwareCenterMessage(
+          result.message || "Atualizações do Software Center iniciadas."
+        );
       }
     } catch (err) {
-      setSoftwareCenterError(err instanceof Error ? err.message : 'Erro desconhecido ao iniciar atualizações.');
+      setSoftwareCenterError(
+        err instanceof Error
+          ? err.message
+          : "Erro desconhecido ao iniciar atualizações."
+      );
     } finally {
       setSoftwareCenterInstalling(false);
     }
@@ -1235,13 +1725,17 @@ export default function Monitor() {
 
   const handleRemoteAction = async (action: string) => {
     if (!canRunHostActions) {
-      setRemoteActionError('Sem permissão para executar ações remotas neste host.');
+      setRemoteActionError(
+        "Sem permissão para executar ações remotas neste host."
+      );
       return;
     }
     const canonicalAction = canonicalRemoteAction(action);
     if (
-      canonicalAction === 'renew-ip' &&
-      !window.confirm(`Tem certeza que deseja renovar o IP de ${selectedHost}? A conexão de rede pode cair por alguns segundos.`)
+      canonicalAction === "renew-ip" &&
+      !window.confirm(
+        `Tem certeza que deseja renovar o IP de ${selectedHost}? A conexão de rede pode cair por alguns segundos.`
+      )
     ) {
       return;
     }
@@ -1256,47 +1750,62 @@ export default function Monitor() {
         await openRemoteToolOnHost(canonicalAction, selectedHost);
         setRemoteActionMessage(`Abertura local iniciada para ${selectedHost}.`);
         setRemoteActionDetails(null);
-        toast.success('Ferramenta aberta no desktop', {
+        toast.success("Ferramenta aberta no desktop", {
           description: selectedHost,
         });
-        void apiRequest('/api/remote-actions', {
-          method: 'POST',
+        void apiRequest("/api/remote-actions", {
+          method: "POST",
           body: JSON.stringify({ host: selectedHost, action: canonicalAction }),
         }).catch(() => undefined);
         return;
       }
 
-      const result = await apiRequest<{ ok: boolean; job_id?: string; status?: string; message: string; details?: string; open_path?: string }>('/api/remote-actions', {
-        method: 'POST',
+      const result = await apiRequest<{
+        ok: boolean;
+        job_id?: string;
+        status?: string;
+        message: string;
+        details?: string;
+        open_path?: string;
+      }>("/api/remote-actions", {
+        method: "POST",
         body: JSON.stringify({ host: selectedHost, action: canonicalAction }),
       });
       if (result.ok) {
-        if (canonicalAction === 'admin-share') {
+        if (canonicalAction === "admin-share") {
           await openPathOnHost(`\\\\${selectedHost}\\c$`);
-        } else if (canonicalAction === 'create-temp-c-share') {
-          await openPathWithRetry(result.open_path || `\\\\${selectedHost}\\TempC$`);
+        } else if (canonicalAction === "create-temp-c-share") {
+          await openPathWithRetry(
+            result.open_path || `\\\\${selectedHost}\\TempC$`
+          );
         }
         const message = result.job_id
           ? `${result.message} Job: ${result.job_id}.`
-          : result.message || 'Ação remota enviada para execução.';
+          : result.message || "Ação remota enviada para execução.";
         setRemoteActionMessage(message);
         setRemoteActionDetails(result.details || null);
-        toast.success('Remote task created', {
-          description: result.job_id ? `${result.job_id} • ${selectedHost}` : selectedHost,
+        toast.success("Remote task created", {
+          description: result.job_id
+            ? `${result.job_id} • ${selectedHost}`
+            : selectedHost,
           action: {
-            label: 'Open Tasks',
-            onClick: () => navigate('/tasks'),
+            label: "Open Tasks",
+            onClick: () => navigate("/tasks"),
           },
         });
       } else {
-        setRemoteActionError(result.message || 'Ação remota falhou.');
+        setRemoteActionError(result.message || "Ação remota falhou.");
         setRemoteActionDetails(result.details || null);
       }
     } catch (err) {
-      setRemoteActionError(err instanceof Error ? err.message : 'Erro desconhecido ao executar a ação.');
+      setRemoteActionError(
+        err instanceof Error
+          ? err.message
+          : "Erro desconhecido ao executar a ação."
+      );
     } finally {
       setRemoteActionLoading(null);
-      if (selectedHost && selectedHost !== 'localhost') {
+      if (selectedHost && selectedHost !== "localhost") {
         void loadMaintenanceStatus(selectedHost);
       }
     }
@@ -1306,15 +1815,15 @@ export default function Monitor() {
     const normalizedHost = host.trim().toUpperCase();
 
     if (!normalizedHost) {
-      setLookupError('Informe um hostname ou IP para pesquisar.');
+      setLookupError("Informe um hostname ou IP para pesquisar.");
       return;
     }
 
     setLookupHost(normalizedHost);
     localStorage.setItem(LAST_MONITOR_HOST_KEY, normalizedHost);
-    if (window.location.pathname === '/monitor') {
+    if (window.location.pathname === "/monitor") {
       const nextUrl = `/monitor?host=${encodeURIComponent(normalizedHost)}`;
-      window.history.replaceState(window.history.state, '', nextUrl);
+      window.history.replaceState(window.history.state, "", nextUrl);
     }
     setLookupLoading(true);
     setLookupError(null);
@@ -1333,13 +1842,13 @@ export default function Monitor() {
     const startedAt = performance.now();
 
     try {
-      const result = await apiRequest<LookupResult>('/api/lookup', {
-        method: 'POST',
+      const result = await apiRequest<LookupResult>("/api/lookup", {
+        method: "POST",
         body: JSON.stringify({ host: normalizedHost }),
       });
       setLookupResult(result);
       rememberLookup(result);
-      if (result.online && result.device_type !== 'printer') {
+      if (result.online && result.device_type !== "printer") {
         const host = result.hostname || normalizedHost;
         setDiagnostic(diagnosticFromLookup({ ...result, hostname: host }));
         void loadSoftwareCenter(host);
@@ -1350,7 +1859,9 @@ export default function Monitor() {
         }
       }
     } catch (err) {
-      setLookupError(err instanceof Error ? err.message : 'Erro desconhecido na busca.');
+      setLookupError(
+        err instanceof Error ? err.message : "Erro desconhecido na busca."
+      );
     } finally {
       setLookupDuration(Math.round(performance.now() - startedAt));
       setLookupLoading(false);
@@ -1358,12 +1869,14 @@ export default function Monitor() {
   };
 
   useEffect(() => {
-    if (authLoading || !user) {
-      return;
-    }
-
-    const queryHost = new URLSearchParams(window.location.search).get('host')?.trim().toUpperCase();
-    const storedHost = localStorage.getItem(LAST_MONITOR_HOST_KEY)?.trim().toUpperCase();
+    const queryHost = new URLSearchParams(window.location.search)
+      .get("host")
+      ?.trim()
+      .toUpperCase();
+    const storedHost = localStorage
+      .getItem(LAST_MONITOR_HOST_KEY)
+      ?.trim()
+      .toUpperCase();
     const host = queryHost || storedHost;
     if (!host || autoLookupHostRef.current === host) {
       return;
@@ -1371,574 +1884,894 @@ export default function Monitor() {
 
     autoLookupHostRef.current = host;
     void runLookup(host);
-  }, [authLoading, location, user]);
+  }, [location]);
 
   useEffect(() => {
     if (!canRunHostActions) return;
     const host = lookupResult?.hostname || lookupHost.trim();
-    if (!host || host === 'localhost') return;
+    if (!host || host === "localhost") return;
 
     const refreshMaintenance = () => {
       if (!document.hidden) void loadMaintenanceStatus(host);
     };
     const handleVisibility = () => {
-      if (document.visibilityState === 'visible') refreshMaintenance();
+      if (document.visibilityState === "visible") refreshMaintenance();
     };
 
-    window.addEventListener('focus', refreshMaintenance);
-    document.addEventListener('visibilitychange', handleVisibility);
+    window.addEventListener("focus", refreshMaintenance);
+    document.addEventListener("visibilitychange", handleVisibility);
     const intervalId = maintenanceStatus?.active
       ? window.setInterval(refreshMaintenance, 15000)
       : null;
 
     return () => {
-      window.removeEventListener('focus', refreshMaintenance);
-      document.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener("focus", refreshMaintenance);
+      document.removeEventListener("visibilitychange", handleVisibility);
       if (intervalId !== null) window.clearInterval(intervalId);
     };
-  }, [canRunHostActions, lookupResult?.hostname, lookupHost, maintenanceStatus?.active]);
-
-  if (authLoading) {
-    return null;
-  }
-
-  if (!user) {
-    navigate('/login');
-    return null;
-  }
+  }, [
+    canRunHostActions,
+    lookupResult?.hostname,
+    lookupHost,
+    maintenanceStatus?.active,
+  ]);
 
   return (
-    <div className="flex h-screen bg-background">
-      <Sidebar user={user.username} permissions={user.permissions} onLogout={handleLogout} />
+    <PageShell>
+      <PageHero
+        eyebrow="Central de suporte"
+        icon={MonitorCog}
+        title="Monitor de equipamentos"
+        description="Localize uma estação ou impressora, confirme seu estado e execute o atendimento sem trocar de tela."
+        meta={
+          <>
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-border/70 bg-background/70 px-3 py-1 text-xs font-medium text-muted-foreground">
+              <ShieldAlert size={13} />
+              Perfil {user.role}
+            </span>
+            {lookupResult && (
+              <span
+                className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold ${
+                  lookupResult.online
+                    ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                    : "border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-300"
+                }`}
+              >
+                {lookupResult.device_type === "printer" ? (
+                  <Printer size={13} />
+                ) : (
+                  <Wifi size={13} />
+                )}
+                {lookupResult.online
+                  ? `${lookupResult.hostname} online`
+                  : `${lookupResult.hostname} indisponível`}
+              </span>
+            )}
+          </>
+        }
+        action={
+          <div className="rounded-xl border border-primary/20 bg-background/90 p-3 shadow-lg shadow-primary/5">
+            <p className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+              Localizar equipamento ou usuário
+            </p>
+            <UniversalSearch
+              initialValue={lookupHost}
+              onWorkstationSelect={host => void runLookup(host)}
+            />
+          </div>
+        }
+      />
 
-      <main className="min-w-0 flex-1 overflow-auto">
-        <div className="mx-auto w-full max-w-7xl space-y-6 p-4 sm:p-6 lg:p-8">
-          {/* Header */}
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-            <div className="min-w-0">
-              <h1 className="text-3xl font-bold text-foreground">Monitor</h1>
-              <p className="mt-1 text-sm text-muted-foreground">Real-time workstation monitoring</p>
-            </div>
-            <Button
-              onClick={() => void runLookup(selectedHost)}
-              variant="outline"
-              size="sm"
-              className="w-fit shrink-0"
-              disabled={lookupLoading}
-            >
-              <RefreshCw size={16} className={`mr-2 ${lookupLoading ? 'animate-spin' : ''}`} />
-              Refresh
-            </Button>
+      <section
+        className="space-y-5"
+        aria-label="Consulta e resultado do equipamento"
+      >
+        <div className="flex flex-col gap-3 rounded-lg border border-border/70 bg-card/80 p-3 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Consultas recentes
+            </span>
+            {recentLookups.length > 0 ? (
+              recentLookups.map(item => (
+                <button
+                  key={`${item.host}-${item.timestamp}`}
+                  type="button"
+                  disabled={lookupLoading}
+                  className={`inline-flex max-w-full items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs font-semibold transition-colors hover:bg-muted ${
+                    item.online
+                      ? "border-emerald-500/25 text-emerald-700 dark:text-emerald-300"
+                      : "border-red-500/25 text-red-700 dark:text-red-300"
+                  } disabled:cursor-not-allowed disabled:opacity-60`}
+                  title={`Pesquisar ${item.host}`}
+                  onClick={() => runLookup(item.host)}
+                >
+                  {item.deviceType === "printer" ? (
+                    <Printer size={13} className="shrink-0" />
+                  ) : (
+                    <span
+                      className={`size-1.5 rounded-full ${item.online ? "bg-emerald-500" : "bg-red-500"}`}
+                    />
+                  )}
+                  <span className="truncate">{item.host}</span>
+                </button>
+              ))
+            ) : (
+              <span className="text-xs text-muted-foreground">
+                Nenhuma nesta sessão
+              </span>
+            )}
           </div>
 
-          <section className="space-y-5">
-            <div className="relative z-30 flex flex-col gap-4 overflow-visible rounded-xl bg-card p-4 shadow-sm ring-1 ring-border/40 xl:flex-row xl:items-end xl:justify-between">
+          <div className="flex shrink-0 items-center gap-2">
+            {lookupDuration !== null && (
+              <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                <Clock3 size={13} />
+                {(lookupDuration / 1000).toFixed(1)}s
+              </span>
+            )}
+            {lookupResult && (
+              <Button
+                onClick={() => void runLookup(selectedHost)}
+                variant="outline"
+                size="sm"
+                disabled={lookupLoading}
+              >
+                <RefreshCw
+                  size={15}
+                  className={lookupLoading ? "animate-spin" : ""}
+                />
+                Atualizar coleta
+              </Button>
+            )}
+          </div>
+        </div>
+
+        {lookupLoading && (
+          <div
+            role="status"
+            aria-live="polite"
+            className="rounded-xl border border-blue-200 bg-blue-50 p-5 text-blue-900 shadow-sm dark:border-blue-400/30 dark:bg-blue-500/10 dark:text-blue-100"
+          >
+            <div className="flex items-start gap-3">
+              <Loader2 size={18} className="mt-0.5 shrink-0 animate-spin" />
               <div className="min-w-0">
-                <h2 className="text-lg font-semibold text-foreground">Busca universal</h2>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  Pesquise um usuário, WKS, IP, matrícula ou serial e alterne entre os resultados sem sair do fluxo.
+                <p className="text-sm font-semibold">
+                  Consultando {lookupHost || "equipamento"}...
+                </p>
+                <p className="mt-1 text-sm opacity-85">
+                  {lookupLoadingMessages[lookupLoadingStep]}
                 </p>
               </div>
-              <UniversalSearch initialValue={lookupHost} onWorkstationSelect={(host) => void runLookup(host)} />
             </div>
+            <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-blue-200/70 dark:bg-blue-950">
+              <div
+                className="h-full rounded-full bg-blue-600 transition-all duration-500"
+                style={{ width: `${25 + lookupLoadingStep * 20}%` }}
+              />
+            </div>
+          </div>
+        )}
 
-              {lookupLoading && (
-                <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-blue-900 shadow-sm dark:border-blue-400/30 dark:bg-blue-500/10 dark:text-blue-100">
-                  <div className="flex items-start gap-3">
-                    <Loader2 size={18} className="mt-0.5 shrink-0 animate-spin" />
-                    <div className="min-w-0">
-                      <p className="text-sm font-semibold">Searching {lookupHost || 'workstation'}...</p>
-                      <p className="mt-1 text-sm opacity-85">{lookupLoadingMessages[lookupLoadingStep]}</p>
-                    </div>
-                  </div>
-                  <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-blue-200/70 dark:bg-blue-950">
-                    <div
-                      className="h-full rounded-full bg-blue-600 transition-all duration-500"
-                      style={{ width: `${25 + lookupLoadingStep * 20}%` }}
-                    />
-                  </div>
-                </div>
-              )}
-
-              {(lookupDuration !== null || recentLookups.length > 0) && (
-                <div className="flex flex-col gap-3 py-1 lg:flex-row lg:items-center lg:justify-between">
-                  <div className="flex min-w-0 flex-wrap items-center gap-2">
-                    <span className="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground">
-                      <Clock3 size={14} />
-                      {lookupDuration !== null ? `Última consulta: ${(lookupDuration / 1000).toFixed(1)}s` : 'Sem consulta'}
-                    </span>
-                    {lookupResult && (
-                      <span className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs font-semibold ${
-                        lookupResult.online
-                          ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-300'
-                          : 'bg-red-500/10 text-red-600 dark:text-red-300'
-                      }`}>
-                        <CheckCircle2 size={13} />
-                        {lookupResult.online ? 'Coleta concluída' : 'Indisponível'}
-                      </span>
-                    )}
-                  </div>
-
-                  {recentLookups.length > 0 && (
-                    <div className="flex min-w-0 flex-wrap gap-2">
-                      {recentLookups.map((item) => (
-                        <button
-                          key={`${item.host}-${item.timestamp}`}
-                          type="button"
-                          disabled={lookupLoading}
-                          className={`max-w-full rounded-full border px-3 py-1 text-xs font-medium transition-colors hover:bg-muted ${
-                            item.online
-                              ? 'border-emerald-500/30 text-emerald-600 dark:text-emerald-300'
-                              : 'border-red-500/30 text-red-600 dark:text-red-300'
-                          } disabled:cursor-not-allowed disabled:opacity-60`}
-                          title={`Pesquisar ${item.host}`}
-                          onClick={() => runLookup(item.host)}
-                        >
-                          <span className="break-all">{item.host}</span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {lookupError && (
-                <div className="rounded-lg bg-red-50 p-4 ring-1 ring-red-200 dark:bg-red-900/20 dark:ring-red-900/50">
-                    <p className="text-red-800 dark:text-red-200">{lookupError}</p>
-                </div>
-              )}
-
-              {lookupResult && !lookupResult.online && (
-                <OfflineComputerPanel result={lookupResult} />
-              )}
-
-              {lookupResult && lookupResult.online && lookupResult.device_type === 'printer' && (
-                <PrinterDashboard result={lookupResult} />
-              )}
-
-              {lookupResult && lookupResult.online && lookupResult.device_type !== 'printer' && (
-                <>
-                <div className="space-y-4">
-                  <section className="surface-hero overflow-hidden p-4">
-                    <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-                      <div className="min-w-0">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="inline-flex items-center gap-2 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-xs font-bold text-emerald-600 dark:text-emerald-300">
-                            <CheckCircle2 size={14} />
-                            ONLINE
-                          </span>
-                          <span className="rounded-full border border-primary/25 bg-primary/10 px-3 py-1 text-xs font-bold text-primary">
-                            Host Command Center
-                          </span>
-                          {hostHistoryLoading && (
-                            <span className="inline-flex items-center gap-1 rounded-full border border-border/70 bg-background/70 px-3 py-1 text-xs font-medium text-muted-foreground">
-                              <Loader2 size={13} className="animate-spin" />
-                              Histórico
-                            </span>
-                          )}
-                        </div>
-                        <div className="mt-3 flex min-w-0 flex-wrap items-center gap-2">
-                          <h2 className="min-w-0 break-words text-2xl font-bold leading-tight text-foreground">{lookupResult.hostname || 'N/A'}</h2>
-                          <CopyButton value={lookupResult.hostname} label="Hostname" />
-                        </div>
-                        <p className="mt-1 break-words text-sm text-muted-foreground">
-                          {lookupResult.current_user || 'Usuário não identificado'} · {lookupResult.os || 'Sistema operacional não identificado'}
-                        </p>
-                      </div>
-
-                      <div className="grid min-w-0 gap-3 xl:min-w-[560px]">
-                        <div className="grid gap-2 sm:grid-cols-3">
-                          <InfoTile label="IP" value={lookupResult.ip_address} copyable />
-                          <InfoTile label="Serial" value={lookupResult.serial_number} copyable />
-                          <InfoTile
-                            label="SCCM"
-                            value={softwareCenterLoading ? 'Consultando...' : softwareCenter?.installed ? 'Instalado' : softwareCenter ? 'Não detectado' : 'Não consultado'}
-                          />
-                        </div>
-                        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
-                          {hostHistoryError && (
-                            <span className="text-xs text-amber-600 dark:text-amber-300">
-                              Histórico indisponível para o resumo completo.
-                            </span>
-                          )}
-                          <CopyTicketButton
-                            result={lookupResult}
-                            diagnostic={diagnostic}
-                            softwareCenter={softwareCenter}
-                            activeUpdateJob={activeUpdateJob}
-                            historyEvents={hostHistory?.events || []}
-                          />
-                          {canRunHostActions && (
-                            <div className="flex flex-col items-end gap-1">
-                              <Button
-                                type="button"
-                                variant={maintenanceStatus?.active ? 'destructive' : 'default'}
-                                className="min-h-10"
-                                disabled={maintenanceLoading}
-                                onClick={() => {
-                                  if (maintenanceStatus?.active) {
-                                    void changeMaintenanceMode('disable');
-                                  } else {
-                                    setMaintenanceDialogOpen(true);
-                                  }
-                                }}
-                              >
-                                {maintenanceLoading ? <Loader2 size={16} className="mr-2 animate-spin" /> : <ShieldAlert size={16} className="mr-2" />}
-                                {maintenanceStatus?.active ? 'Remover manutenção' : 'Modo Manutenção'}
-                              </Button>
-                              {maintenanceStatus?.active && (
-                                <span className="text-[11px] text-muted-foreground">
-                                  {maintenanceStatus.cleanup_required
-                                    ? 'Limpeza pendente • clique em Remover manutenção'
-                                    : maintenanceStatus.lock_screen_applied && maintenanceStatus.logon_blocked && maintenanceStatus.remote_logon_blocked
-                                    ? `Lock screen ativa • ${maintenanceStatus.protected_users.length} usuário(s) bloqueado(s)`
-                                    : 'Proteção de manutenção não confirmada'}
-                                </span>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  </section>
-
-                  <div className="grid gap-3 lg:grid-cols-[1.05fr_1fr]">
-                    <section className="min-w-0 rounded-xl bg-card p-4 shadow-sm ring-1 ring-border/40">
-                      <div className="mb-4 flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                        <div className="min-w-0">
-                          <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Workstation</p>
-                          <div className="mt-1 flex min-w-0 items-start gap-2">
-                            <h2 className="min-w-0 break-words text-2xl font-bold leading-tight text-foreground">
-                              {lookupResult.hostname || '—'}
-                            </h2>
-                            <CopyButton value={lookupResult.hostname} label="Hostname" />
-                          </div>
-                          <div className="mt-1 flex min-w-0 items-center gap-2">
-                            <p className="min-w-0 break-words text-sm text-muted-foreground">
-                              {lookupResult.current_user || 'Usuário não identificado'}
-                            </p>
-                            <CopyButton value={lookupResult.current_user} label="Usuário atual" />
-                          </div>
-                        </div>
-                        <span className="w-fit rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-xs font-bold text-emerald-600 dark:text-emerald-300">
-                          ONLINE
-                        </span>
-                      </div>
-
-                      <div className="grid gap-3 sm:grid-cols-2">
-                        <InfoTile label="IP Address" value={lookupResult.ip_address} copyable />
-                        <InfoTile label="MAC Address" value={lookupResult.mac_address} copyable />
-                        <InfoTile label="Last Boot" value={formatLastBoot(lookupResult.last_boot)} className="sm:col-span-2" />
-                        <InfoTile
-                          label="Organization Unit"
-                          value={lookupResult.active_directory?.organizational_unit}
-                          className="sm:col-span-2"
-                          copyable
-                        />
-                      </div>
-                    </section>
-
-                    <section className="min-w-0 rounded-xl bg-card p-4 shadow-sm ring-1 ring-border/40">
-                      <div className="mb-4">
-                        <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Hardware and OS</p>
-                        <h3 className="mt-1 text-base font-semibold text-foreground">Resumo do equipamento</h3>
-                      </div>
-
-                      <div className="grid gap-3 sm:grid-cols-2">
-                        <InfoTile label="Manufacturer" value={lookupResult.manufacturer} />
-                        <InfoTile label="Model" value={lookupResult.model} copyable />
-                        <InfoTile label="Serial Number" value={lookupResult.serial_number} copyable />
-                        <InfoTile label="RAM" value={lookupResult.ram_gb ? `${lookupResult.ram_gb} GB` : ''} />
-                        <InfoTile label="Operating System" value={lookupResult.os} className="sm:col-span-2" copyable />
-                        <InfoTile label="Processor" value={lookupResult.processor} className="sm:col-span-2" />
-                      </div>
-                    </section>
-                  </div>
-
-                  <section className="min-w-0 rounded-xl bg-card p-4 shadow-sm ring-1 ring-border/40">
-                    <div className="mb-4 flex flex-col gap-1">
-                      <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Storage</p>
-                      <h3 className="text-base font-semibold text-foreground">Disco local C:</h3>
-                    </div>
-
-                    <div className="space-y-3 text-sm text-muted-foreground">
-                      {(() => {
-                        const total = lookupResult.storage_total_gb || 0;
-                        const free = lookupResult.storage_free_gb || 0;
-                        const used = total > 0 ? total - free : 0;
-                        const percent = total > 0 ? Math.round((used / total) * 100) : 0;
-                        return (
-                          <>
-                            <div className="grid gap-2 sm:grid-cols-[1fr_auto] sm:items-center">
-                              <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
-                              <span className="font-semibold text-foreground">{used} GB</span>
-                              <span className="text-xs text-muted-foreground">usados</span>
-                              </div>
-                              <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1 sm:justify-end">
-                              <span className="font-semibold text-foreground">{free} GB</span>
-                              <span className="text-xs text-muted-foreground">livres</span>
-                              </div>
-                            </div>
-                            <div className="w-full h-3 bg-muted rounded-full overflow-hidden mt-2 mb-1">
-                              <div
-                                className="h-full bg-primary transition-all"
-                                style={{ width: `${percent}%` }}
-                              />
-                            </div>
-                            <div className="flex justify-between text-xs text-muted-foreground">
-                              <span>Total: {total} GB</span>
-                              <span>{percent}% usado</span>
-                            </div>
-                          </>
-                        );
-                      })()}
-                    </div>
-                  </section>
-
-                  {canRunHostActions && diagnosticLoading && !diagnostic && (
-                    <section className="rounded-xl bg-card p-4 shadow-sm ring-1 ring-border/40">
-                      <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                        <Loader2 size={16} className="animate-spin" />
-                        Gerando diagnóstico visual...
-                      </div>
-                    </section>
-                  )}
-
-                  {canRunHostActions && diagnostic && (
-                    <DiagnosticPanel
-                      data={diagnostic}
-                      onRefresh={() => loadDiagnostic(selectedHost, true)}
-                      onCleanup={runQuickCleanup}
-                      quickActions={quickActions}
-                      remoteActionLoading={remoteActionLoading}
-                      onRemoteAction={handleRemoteAction}
-                      refreshing={diagnosticLoading}
-                      cleaning={cleanupLoading}
-                    />
-                  )}
-                </div>
-
-                <Dialog open={maintenanceDialogOpen} onOpenChange={setMaintenanceDialogOpen}>
-                  <DialogContent>
-                    <DialogHeader>
-                      <DialogTitle>Ativar modo manutenção</DialogTitle>
-                      <DialogDescription>
-                        O WMT aplicará uma lock screen de manutenção no Windows e bloqueará o login dos colaboradores identificados. O usuário administrativo que ativar o modo continuará disponível para o suporte via RDP.
-                      </DialogDescription>
-                    </DialogHeader>
-                    <div className="grid gap-4 py-2">
-                      <div className="grid gap-2">
-                        <Label>Técnico responsável</Label>
-                        <Input value={user.display_name || user.username} disabled />
-                      </div>
-                      <div className="grid gap-2">
-                        <Label htmlFor="maintenance-ticket">Chamado</Label>
-                        <Input
-                          id="maintenance-ticket"
-                          value={maintenanceTicket}
-                          maxLength={100}
-                          placeholder="Ex.: INC0012345"
-                          onChange={(event) => setMaintenanceTicket(event.target.value)}
-                        />
-                      </div>
-                      <div className="grid gap-2">
-                        <Label htmlFor="maintenance-reason">Motivo da manutenção</Label>
-                        <Textarea
-                          id="maintenance-reason"
-                          value={maintenanceReason}
-                          maxLength={500}
-                          placeholder="Descreva resumidamente o atendimento"
-                          onChange={(event) => setMaintenanceReason(event.target.value)}
-                        />
-                      </div>
-                      <div className="grid gap-2">
-                        <Label htmlFor="maintenance-contact">Ramal ou contato</Label>
-                        <Input
-                          id="maintenance-contact"
-                          value={maintenanceContact}
-                          maxLength={200}
-                          placeholder="Ex.: Ramal 1234 ou Service Desk"
-                          onChange={(event) => setMaintenanceContact(event.target.value)}
-                        />
-                      </div>
-                      <div className="grid gap-2">
-                        <Label htmlFor="maintenance-duration">Duração máxima</Label>
-                        <select
-                          id="maintenance-duration"
-                          value={maintenanceDuration}
-                          className="h-10 rounded-md border border-input bg-background px-3 text-sm"
-                          onChange={(event) => setMaintenanceDuration(Number(event.target.value))}
-                        >
-                          <option value={30}>30 minutos</option>
-                          <option value={60}>1 hora</option>
-                          <option value={120}>2 horas</option>
-                          <option value={240}>4 horas</option>
-                          <option value={480}>8 horas</option>
-                        </select>
-                      </div>
-                      <p className="text-xs leading-5 text-muted-foreground">
-                        Ao remover o modo, as tarefas e arquivos serão excluídos e as políticas de logon anteriores serão restauradas automaticamente.
-                      </p>
-                    </div>
-                    <DialogFooter>
-                      <Button variant="outline" disabled={maintenanceLoading} onClick={() => setMaintenanceDialogOpen(false)}>
-                        Cancelar
-                      </Button>
-                      <Button
-                        disabled={maintenanceLoading || !maintenanceTicket.trim() || !maintenanceReason.trim()}
-                        onClick={() => void changeMaintenanceMode('enable')}
-                      >
-                        {maintenanceLoading && <Loader2 size={16} className="mr-2 animate-spin" />}
-                        Ativar
-                      </Button>
-                    </DialogFooter>
-                  </DialogContent>
-                </Dialog>
-
-                <section className="space-y-4 border-t border-border/60 pt-5">
+        {!lookupLoading && !lookupResult && !lookupError && (
+          <div className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
+            <EmptyState
+              icon={MonitorCog}
+              title="Comece localizando um equipamento"
+              description="Use a busca acima com hostname, endereço IP, número de série, usuário ou matrícula."
+              className="min-h-64 bg-card/70"
+            />
+            <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-1">
+              {[
+                {
+                  icon: Wifi,
+                  title: "Confirme disponibilidade",
+                  text: "Veja conectividade, usuário atual e informações do Windows.",
+                },
+                {
+                  icon: Cpu,
+                  title: "Diagnostique",
+                  text: "Analise hardware, armazenamento, SCCM e inventário.",
+                },
+                {
+                  icon: ArrowRight,
+                  title: "Execute o atendimento",
+                  text: "Acesse ferramentas remotas e registre ações no histórico.",
+                },
+              ].map(({ icon: Icon, title, text }, index) => (
+                <div
+                  key={title}
+                  className="flex items-start gap-3 rounded-lg border border-border/70 bg-card/80 p-4 shadow-sm"
+                >
+                  <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                    <Icon size={17} />
+                  </span>
                   <div>
-                    <h2 className="text-xl font-semibold text-foreground">Remote Actions</h2>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      Atalhos rápidos para manutenção e suporte remoto da workstation pesquisada.
+                    <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      Etapa {index + 1}
+                    </p>
+                    <p className="mt-1 text-sm font-semibold text-foreground">
+                      {title}
+                    </p>
+                    <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                      {text}
                     </p>
                   </div>
-                    <div className="grid gap-4">
-                      <section className="min-w-0 rounded-xl bg-card p-4 shadow-sm ring-1 ring-border/40">
-                        <div className="mb-4 min-w-0">
-                          <h3 className="text-base font-semibold text-foreground">Configuration Manager</h3>
-                          <p className="mt-1 break-words text-sm text-muted-foreground">Software Center, SCCM client e updates do host selecionado.</p>
-                        </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
-                        <div className="space-y-3">
-                          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                            <div className="min-w-0 rounded-lg bg-muted/35 px-3 py-2 ring-1 ring-border/40">
-                              <p className="text-xs text-muted-foreground">SCCM Client</p>
-                              <p className="mt-1 break-words text-sm font-semibold text-foreground">
-                                {softwareCenterLoading ? 'Consultando...' : softwareCenter?.installed ? 'Instalado' : 'Não detectado'}
+        {lookupError && (
+          <div
+            role="alert"
+            className="flex flex-col gap-4 rounded-lg bg-red-50 p-5 ring-1 ring-red-200 dark:bg-red-900/20 dark:ring-red-900/50 sm:flex-row sm:items-center sm:justify-between"
+          >
+            <div>
+              <p className="text-sm font-semibold text-red-900 dark:text-red-100">
+                Não foi possível concluir a consulta
+              </p>
+              <p className="mt-1 text-sm text-red-800 dark:text-red-200">
+                {lookupError}
+              </p>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void runLookup(selectedHost)}
+            >
+              <RefreshCw size={15} />
+              Tentar novamente
+            </Button>
+          </div>
+        )}
+
+        {lookupResult && !lookupResult.online && (
+          <OfflineComputerPanel result={lookupResult} />
+        )}
+
+        {lookupResult &&
+          lookupResult.online &&
+          lookupResult.device_type === "printer" && (
+            <PrinterDashboard result={lookupResult} />
+          )}
+
+        {lookupResult &&
+          lookupResult.online &&
+          lookupResult.device_type !== "printer" && (
+            <>
+              <div className="space-y-4">
+                <section className="relative overflow-hidden rounded-xl border border-emerald-500/25 bg-gradient-to-br from-emerald-500/12 via-card to-primary/8 p-5 shadow-md">
+                  <div className="absolute inset-y-0 left-0 w-1 bg-emerald-500" />
+                  <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="inline-flex items-center gap-2 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-xs font-bold text-emerald-600 dark:text-emerald-300">
+                          <CheckCircle2 size={14} />
+                          ONLINE
+                        </span>
+                        <span className="rounded-full border border-primary/25 bg-primary/10 px-3 py-1 text-xs font-bold text-primary">
+                          Estação de trabalho
+                        </span>
+                        {hostHistoryLoading && (
+                          <span className="inline-flex items-center gap-1 rounded-full border border-border/70 bg-background/70 px-3 py-1 text-xs font-medium text-muted-foreground">
+                            <Loader2 size={13} className="animate-spin" />
+                            Histórico
+                          </span>
+                        )}
+                      </div>
+                      <div className="mt-3 flex min-w-0 flex-wrap items-center gap-2">
+                        <h2 className="min-w-0 break-words text-3xl font-bold leading-tight tracking-tight text-foreground">
+                          {lookupResult.hostname || "N/A"}
+                        </h2>
+                        <CopyButton
+                          value={lookupResult.hostname}
+                          label="Hostname"
+                        />
+                      </div>
+                      <p className="mt-1 break-words text-sm text-muted-foreground">
+                        Em uso por{" "}
+                        <span className="font-medium text-foreground">
+                          {lookupResult.current_user ||
+                            "usuário não identificado"}
+                        </span>
+                        {" · "}
+                        {lookupResult.os ||
+                          "Sistema operacional não identificado"}
+                      </p>
+                    </div>
+
+                    <div className="grid min-w-0 gap-3">
+                      <div className="grid gap-2 sm:grid-cols-3">
+                        <InfoTile
+                          label="IP"
+                          value={lookupResult.ip_address}
+                          copyable
+                        />
+                        <InfoTile
+                          label="Serial"
+                          value={lookupResult.serial_number}
+                          copyable
+                        />
+                        <InfoTile
+                          label="SCCM"
+                          value={
+                            softwareCenterLoading
+                              ? "Consultando..."
+                              : softwareCenter?.installed
+                                ? "Instalado"
+                                : softwareCenter
+                                  ? "Não detectado"
+                                  : "Não consultado"
+                          }
+                        />
+                      </div>
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
+                        {hostHistoryError && (
+                          <span className="text-xs text-amber-600 dark:text-amber-300">
+                            Histórico indisponível para o resumo completo.
+                          </span>
+                        )}
+                        <CopyTicketButton
+                          result={lookupResult}
+                          diagnostic={diagnostic}
+                          softwareCenter={softwareCenter}
+                          activeUpdateJob={activeUpdateJob}
+                          historyEvents={hostHistory?.events || []}
+                        />
+                        {canRunHostActions && (
+                          <div className="flex flex-col items-end gap-1">
+                            <Button
+                              type="button"
+                              variant={
+                                maintenanceStatus?.active
+                                  ? "destructive"
+                                  : "default"
+                              }
+                              className="min-h-10"
+                              disabled={maintenanceLoading}
+                              onClick={() => {
+                                if (maintenanceStatus?.active) {
+                                  void changeMaintenanceMode("disable");
+                                } else {
+                                  setMaintenanceDialogOpen(true);
+                                }
+                              }}
+                            >
+                              {maintenanceLoading ? (
+                                <Loader2
+                                  size={16}
+                                  className="mr-2 animate-spin"
+                                />
+                              ) : (
+                                <ShieldAlert size={16} className="mr-2" />
+                              )}
+                              {maintenanceStatus?.active
+                                ? "Remover manutenção"
+                                : "Modo Manutenção"}
+                            </Button>
+                            {maintenanceStatus?.active && (
+                              <span className="text-[11px] text-muted-foreground">
+                                {maintenanceStatus.cleanup_required
+                                  ? "Limpeza pendente • clique em Remover manutenção"
+                                  : maintenanceStatus.lock_screen_applied &&
+                                      maintenanceStatus.logon_blocked &&
+                                      maintenanceStatus.remote_logon_blocked
+                                    ? `Lock screen ativa • ${maintenanceStatus.protected_users.length} usuário(s) bloqueado(s)`
+                                    : "Proteção de manutenção não confirmada"}
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </section>
+
+                <div className="grid gap-3 lg:grid-cols-[1.05fr_1fr]">
+                  <section className="min-w-0 rounded-xl border border-border/70 bg-card/95 p-5 shadow-sm">
+                    <div className="mb-4 flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                      <div className="min-w-0">
+                        <p className="text-[11px] font-semibold uppercase tracking-wide text-primary">
+                          Identidade e rede
+                        </p>
+                        <h3 className="mt-1 text-base font-semibold text-foreground">
+                          Como encontrar este equipamento
+                        </h3>
+                      </div>
+                      <span className="inline-flex w-fit items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-xs font-bold text-emerald-700 dark:text-emerald-300">
+                        <Wifi size={13} />
+                        Conectado
+                      </span>
+                    </div>
+
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <InfoTile
+                        label="Endereço IP"
+                        value={lookupResult.ip_address}
+                        copyable
+                      />
+                      <InfoTile
+                        label="Endereço MAC"
+                        value={lookupResult.mac_address}
+                        copyable
+                      />
+                      <InfoTile
+                        label="Última inicialização"
+                        value={formatLastBoot(lookupResult.last_boot)}
+                        className="sm:col-span-2"
+                      />
+                      <InfoTile
+                        label="Unidade organizacional"
+                        value={
+                          lookupResult.active_directory?.organizational_unit
+                        }
+                        className="sm:col-span-2"
+                        copyable
+                      />
+                    </div>
+                  </section>
+
+                  <section className="min-w-0 rounded-xl border border-border/70 bg-card/95 p-5 shadow-sm">
+                    <div className="mb-4">
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-primary">
+                        Hardware e sistema
+                      </p>
+                      <h3 className="mt-1 text-base font-semibold text-foreground">
+                        Resumo do equipamento
+                      </h3>
+                    </div>
+
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <InfoTile
+                        label="Fabricante"
+                        value={lookupResult.manufacturer}
+                      />
+                      <InfoTile
+                        label="Modelo"
+                        value={lookupResult.model}
+                        copyable
+                      />
+                      <InfoTile
+                        label="Número de série"
+                        value={lookupResult.serial_number}
+                        copyable
+                      />
+                      <InfoTile
+                        label="RAM"
+                        value={
+                          lookupResult.ram_gb ? `${lookupResult.ram_gb} GB` : ""
+                        }
+                      />
+                      <InfoTile
+                        label="Sistema operacional"
+                        value={lookupResult.os}
+                        className="sm:col-span-2"
+                        copyable
+                      />
+                      <InfoTile
+                        label="Processador"
+                        value={lookupResult.processor}
+                        className="sm:col-span-2"
+                      />
+                    </div>
+                  </section>
+                </div>
+
+                <section className="min-w-0 rounded-xl border border-border/70 bg-card/95 p-5 shadow-sm">
+                  <div className="mb-4 flex flex-col gap-1">
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-primary">
+                      Armazenamento
+                    </p>
+                    <h3 className="text-base font-semibold text-foreground">
+                      Disco local C:
+                    </h3>
+                  </div>
+
+                  <div className="space-y-3 text-sm text-muted-foreground">
+                    {(() => {
+                      const total = lookupResult.storage_total_gb || 0;
+                      const free = lookupResult.storage_free_gb || 0;
+                      const used = total > 0 ? total - free : 0;
+                      const percent =
+                        total > 0 ? Math.round((used / total) * 100) : 0;
+                      return (
+                        <>
+                          <div className="grid gap-2 sm:grid-cols-[1fr_auto] sm:items-center">
+                            <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
+                              <span className="font-semibold text-foreground">
+                                {used} GB
+                              </span>
+                              <span className="text-xs text-muted-foreground">
+                                usados
+                              </span>
+                            </div>
+                            <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1 sm:justify-end">
+                              <span className="font-semibold text-foreground">
+                                {free} GB
+                              </span>
+                              <span className="text-xs text-muted-foreground">
+                                livres
+                              </span>
+                            </div>
+                          </div>
+                          <div className="mb-1 mt-2 h-3 w-full overflow-hidden rounded-full bg-muted">
+                            <div
+                              className={`h-full transition-all ${
+                                percent >= 90
+                                  ? "bg-red-500"
+                                  : percent >= 75
+                                    ? "bg-amber-500"
+                                    : "bg-primary"
+                              }`}
+                              style={{ width: `${percent}%` }}
+                            />
+                          </div>
+                          <div className="flex justify-between text-xs text-muted-foreground">
+                            <span>Total: {total} GB</span>
+                            <span>{percent}% usado</span>
+                          </div>
+                        </>
+                      );
+                    })()}
+                  </div>
+                </section>
+
+                {canRunHostActions && diagnosticLoading && !diagnostic && (
+                  <section className="rounded-xl bg-card p-4 shadow-sm ring-1 ring-border/40">
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <Loader2 size={16} className="animate-spin" />
+                      Gerando diagnóstico visual...
+                    </div>
+                  </section>
+                )}
+
+                {canRunHostActions && diagnostic && (
+                  <DiagnosticPanel
+                    data={diagnostic}
+                    onRefresh={() => loadDiagnostic(selectedHost, true)}
+                    onCleanup={runQuickCleanup}
+                    quickActions={quickActions}
+                    remoteActionLoading={remoteActionLoading}
+                    onRemoteAction={handleRemoteAction}
+                    refreshing={diagnosticLoading}
+                    cleaning={cleanupLoading}
+                  />
+                )}
+              </div>
+
+              <Dialog
+                open={maintenanceDialogOpen}
+                onOpenChange={setMaintenanceDialogOpen}
+              >
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>Ativar modo manutenção</DialogTitle>
+                    <DialogDescription>
+                      O WMT aplicará uma lock screen de manutenção no Windows e
+                      bloqueará o login dos colaboradores identificados. O
+                      usuário administrativo que ativar o modo continuará
+                      disponível para o suporte via RDP.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <div className="grid gap-4 py-2">
+                    <div className="grid gap-2">
+                      <Label>Técnico responsável</Label>
+                      <Input
+                        value={user.display_name || user.username}
+                        disabled
+                      />
+                    </div>
+                    <div className="grid gap-2">
+                      <Label htmlFor="maintenance-ticket">Chamado</Label>
+                      <Input
+                        id="maintenance-ticket"
+                        value={maintenanceTicket}
+                        maxLength={100}
+                        placeholder="Ex.: INC0012345"
+                        onChange={event =>
+                          setMaintenanceTicket(event.target.value)
+                        }
+                      />
+                    </div>
+                    <div className="grid gap-2">
+                      <Label htmlFor="maintenance-reason">
+                        Motivo da manutenção
+                      </Label>
+                      <Textarea
+                        id="maintenance-reason"
+                        value={maintenanceReason}
+                        maxLength={500}
+                        placeholder="Descreva resumidamente o atendimento"
+                        onChange={event =>
+                          setMaintenanceReason(event.target.value)
+                        }
+                      />
+                    </div>
+                    <div className="grid gap-2">
+                      <Label htmlFor="maintenance-contact">
+                        Ramal ou contato
+                      </Label>
+                      <Input
+                        id="maintenance-contact"
+                        value={maintenanceContact}
+                        maxLength={200}
+                        placeholder="Ex.: Ramal 1234 ou Service Desk"
+                        onChange={event =>
+                          setMaintenanceContact(event.target.value)
+                        }
+                      />
+                    </div>
+                    <div className="grid gap-2">
+                      <Label htmlFor="maintenance-duration">
+                        Duração máxima
+                      </Label>
+                      <select
+                        id="maintenance-duration"
+                        value={maintenanceDuration}
+                        className="h-10 rounded-md border border-input bg-background px-3 text-sm"
+                        onChange={event =>
+                          setMaintenanceDuration(Number(event.target.value))
+                        }
+                      >
+                        <option value={30}>30 minutos</option>
+                        <option value={60}>1 hora</option>
+                        <option value={120}>2 horas</option>
+                        <option value={240}>4 horas</option>
+                        <option value={480}>8 horas</option>
+                      </select>
+                    </div>
+                    <p className="text-xs leading-5 text-muted-foreground">
+                      Ao remover o modo, as tarefas e arquivos serão excluídos e
+                      as políticas de logon anteriores serão restauradas
+                      automaticamente.
+                    </p>
+                  </div>
+                  <DialogFooter>
+                    <Button
+                      variant="outline"
+                      disabled={maintenanceLoading}
+                      onClick={() => setMaintenanceDialogOpen(false)}
+                    >
+                      Cancelar
+                    </Button>
+                    <Button
+                      disabled={
+                        maintenanceLoading ||
+                        !maintenanceTicket.trim() ||
+                        !maintenanceReason.trim()
+                      }
+                      onClick={() => void changeMaintenanceMode("enable")}
+                    >
+                      {maintenanceLoading && (
+                        <Loader2 size={16} className="mr-2 animate-spin" />
+                      )}
+                      Ativar
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+
+              <section className="space-y-4 rounded-xl border border-primary/15 bg-primary/[0.03] p-4 sm:p-5">
+                <SectionHeading
+                  title="Ações e atualizações"
+                  description="Execute rotinas de suporte no equipamento selecionado e acompanhe o resultado."
+                  action={
+                    <span className="inline-flex items-center gap-1.5 rounded-full border border-border/70 bg-card px-3 py-1 text-xs font-semibold text-muted-foreground">
+                      <History size={13} />
+                      Registrado no histórico
+                    </span>
+                  }
+                />
+                <div className="grid gap-4">
+                  <section className="min-w-0 rounded-xl bg-card p-4 shadow-sm ring-1 ring-border/40">
+                    <div className="mb-4 min-w-0">
+                      <h3 className="text-base font-semibold text-foreground">
+                        Configuration Manager
+                      </h3>
+                      <p className="mt-1 break-words text-sm text-muted-foreground">
+                        Software Center, cliente SCCM e atualizações do
+                        equipamento.
+                      </p>
+                    </div>
+
+                    <div className="space-y-3">
+                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                        <div className="min-w-0 rounded-lg bg-muted/35 px-3 py-2 ring-1 ring-border/40">
+                          <p className="text-xs text-muted-foreground">
+                            SCCM Client
+                          </p>
+                          <p className="mt-1 break-words text-sm font-semibold text-foreground">
+                            {softwareCenterLoading
+                              ? "Consultando..."
+                              : softwareCenter?.installed
+                                ? "Instalado"
+                                : "Não detectado"}
+                          </p>
+                        </div>
+                        <div className="min-w-0 rounded-lg bg-muted/35 px-3 py-2 ring-1 ring-border/40">
+                          <p className="text-xs text-muted-foreground">
+                            Versão
+                          </p>
+                          <p className="mt-1 break-words text-sm font-semibold text-foreground">
+                            {softwareCenter?.clientVersion || "—"}
+                          </p>
+                        </div>
+                        <div className="min-w-0 rounded-lg bg-muted/35 px-3 py-2 ring-1 ring-border/40">
+                          <p className="text-xs text-muted-foreground">
+                            Serviço
+                          </p>
+                          <p className="mt-1 break-words text-sm font-semibold text-foreground">
+                            {softwareCenter?.serviceStatus || "—"}
+                          </p>
+                        </div>
+                        <div className="min-w-0 rounded-lg bg-muted/35 px-3 py-2 ring-1 ring-border/40">
+                          <p className="text-xs text-muted-foreground">
+                            Updates
+                          </p>
+                          <p className="mt-1 break-words text-sm font-semibold text-foreground">
+                            {softwareCenter?.pendingUpdates ?? 0} pendente(s)
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                        {canRunHostActions && (
+                          <Button
+                            className="min-h-10 whitespace-normal px-3 py-2 text-center leading-5"
+                            disabled={
+                              softwareCenterInstalling ||
+                              !softwareCenter?.installed
+                            }
+                            onClick={handleInstallSoftwareCenterUpdates}
+                          >
+                            {softwareCenterInstalling ? (
+                              <Loader2
+                                size={16}
+                                className="mr-2 animate-spin"
+                              />
+                            ) : (
+                              <Play size={16} className="mr-2" />
+                            )}
+                            Instalar atualizações
+                          </Button>
+                        )}
+                        <Button
+                          className="min-h-10 whitespace-normal px-3 py-2 text-center leading-5"
+                          variant="outline"
+                          disabled={softwareCenterLoading}
+                          onClick={() => loadSoftwareCenter(selectedHost)}
+                        >
+                          <RefreshCw
+                            size={16}
+                            className={
+                              softwareCenterLoading || softwareCenterMonitoring
+                                ? "mr-2 animate-spin"
+                                : "mr-2"
+                            }
+                          />
+                          Atualizar status
+                        </Button>
+                      </div>
+
+                      {softwareCenterMonitoring && (
+                        <div className="flex min-w-0 items-center gap-2 rounded-lg bg-blue-500/10 px-3 py-2 text-xs font-medium text-blue-700 ring-1 ring-blue-500/25 dark:text-blue-300">
+                          <Loader2
+                            size={14}
+                            className="shrink-0 animate-spin"
+                          />
+                          <span className="break-words">
+                            Monitorando progresso automaticamente a cada 10s em{" "}
+                            {softwareCenterMonitorHost || selectedHost}.
+                          </span>
+                        </div>
+                      )}
+
+                      {activeUpdateJob && (
+                        <div className="rounded-lg bg-muted/35 p-3 ring-1 ring-border/40">
+                          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                            <div className="min-w-0">
+                              <p className="text-xs font-semibold text-foreground">
+                                Update job {activeUpdateJob.id}
+                              </p>
+                              <p className="mt-1 break-words text-xs text-muted-foreground">
+                                {activeUpdateJob.message ||
+                                  "Acompanhando SCCM Updates."}
                               </p>
                             </div>
-                            <div className="min-w-0 rounded-lg bg-muted/35 px-3 py-2 ring-1 ring-border/40">
-                              <p className="text-xs text-muted-foreground">Versão</p>
-                              <p className="mt-1 break-words text-sm font-semibold text-foreground">{softwareCenter?.clientVersion || '—'}</p>
-                            </div>
-                            <div className="min-w-0 rounded-lg bg-muted/35 px-3 py-2 ring-1 ring-border/40">
-                              <p className="text-xs text-muted-foreground">Serviço</p>
-                              <p className="mt-1 break-words text-sm font-semibold text-foreground">{softwareCenter?.serviceStatus || '—'}</p>
-                            </div>
-                            <div className="min-w-0 rounded-lg bg-muted/35 px-3 py-2 ring-1 ring-border/40">
-                              <p className="text-xs text-muted-foreground">Updates</p>
-                              <p className="mt-1 break-words text-sm font-semibold text-foreground">{softwareCenter?.pendingUpdates ?? 0} pendente(s)</p>
-                            </div>
+                            <span className="w-fit rounded-full border border-border/70 px-2 py-1 text-xs font-semibold text-muted-foreground">
+                              {activeUpdateJob.status}
+                            </span>
                           </div>
-
-                          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                            {canRunHostActions && (
-                              <Button
-                                className="min-h-10 whitespace-normal px-3 py-2 text-center leading-5"
-                                disabled={softwareCenterInstalling || !softwareCenter?.installed}
-                                onClick={handleInstallSoftwareCenterUpdates}
-                              >
-                                {softwareCenterInstalling ? (
-                                  <Loader2 size={16} className="mr-2 animate-spin" />
-                                ) : (
-                                  <Play size={16} className="mr-2" />
-                                )}
-                                Run Updates
-                              </Button>
-                            )}
-                            <Button
-                              className="min-h-10 whitespace-normal px-3 py-2 text-center leading-5"
-                              variant="outline"
-                              disabled={softwareCenterLoading}
-                              onClick={() => loadSoftwareCenter(selectedHost)}
-                            >
-                              <RefreshCw size={16} className={softwareCenterLoading || softwareCenterMonitoring ? 'mr-2 animate-spin' : 'mr-2'} />
-                              Refresh
-                            </Button>
+                          <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-background">
+                            <div
+                              className="h-full bg-primary transition-all"
+                              style={{
+                                width: `${Math.max(0, Math.min(100, activeUpdateJob.progress || 0))}%`,
+                              }}
+                            />
                           </div>
+                          <p className="mt-1 text-right text-xs text-muted-foreground">
+                            {activeUpdateJob.progress || 0}%
+                          </p>
+                        </div>
+                      )}
 
-                          {softwareCenterMonitoring && (
-                            <div className="flex min-w-0 items-center gap-2 rounded-lg bg-blue-500/10 px-3 py-2 text-xs font-medium text-blue-700 ring-1 ring-blue-500/25 dark:text-blue-300">
-                              <Loader2 size={14} className="shrink-0 animate-spin" />
-                              <span className="break-words">Monitorando progresso automaticamente a cada 10s em {softwareCenterMonitorHost || selectedHost}.</span>
+                      {softwareCenter?.updates &&
+                        softwareCenter.updates.length > 0 && (
+                          <div className="overflow-hidden rounded-lg bg-background ring-1 ring-border/40">
+                            <div className="grid grid-cols-[minmax(0,1fr)_78px_68px] gap-2 border-b bg-muted/50 px-3 py-2 text-xs font-medium text-muted-foreground">
+                              <span>Update</span>
+                              <span>Article</span>
+                              <span>Progress</span>
                             </div>
-                          )}
-
-                          {activeUpdateJob && (
-                            <div className="rounded-lg bg-muted/35 p-3 ring-1 ring-border/40">
-                              <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                                <div className="min-w-0">
-                                  <p className="text-xs font-semibold text-foreground">Update job {activeUpdateJob.id}</p>
-                                  <p className="mt-1 break-words text-xs text-muted-foreground">{activeUpdateJob.message || 'Acompanhando SCCM Updates.'}</p>
-                                </div>
-                                <span className="w-fit rounded-full border border-border/70 px-2 py-1 text-xs font-semibold text-muted-foreground">
-                                  {activeUpdateJob.status}
-                                </span>
-                              </div>
-                              <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-background">
-                                <div
-                                  className="h-full bg-primary transition-all"
-                                  style={{ width: `${Math.max(0, Math.min(100, activeUpdateJob.progress || 0))}%` }}
-                                />
-                              </div>
-                              <p className="mt-1 text-right text-xs text-muted-foreground">{activeUpdateJob.progress || 0}%</p>
-                            </div>
-                          )}
-
-                          {softwareCenter?.updates && softwareCenter.updates.length > 0 && (
-                            <div className="overflow-hidden rounded-lg bg-background ring-1 ring-border/40">
-                              <div className="grid grid-cols-[minmax(0,1fr)_78px_68px] gap-2 border-b bg-muted/50 px-3 py-2 text-xs font-medium text-muted-foreground">
-                                <span>Update</span>
-                                <span>Article</span>
-                                <span>Progress</span>
-                              </div>
-                              {softwareCenter.updates.slice(0, 6).map((update, index) => (
+                            {softwareCenter.updates
+                              .slice(0, 6)
+                              .map((update, index) => (
                                 <div
                                   key={`${update.articleId || update.name}-${index}`}
                                   className="grid grid-cols-[minmax(0,1fr)_78px_68px] gap-2 border-b px-3 py-2 text-xs last:border-0"
                                 >
-                                  <span className="truncate text-foreground">{update.name || 'Update sem nome'}</span>
-                                  <span className="truncate text-muted-foreground">{update.articleId || update.bulletinId || '—'}</span>
-                                  <span className="text-right text-muted-foreground">{update.percentComplete || 0}%</span>
+                                  <span className="truncate text-foreground">
+                                    {update.name || "Update sem nome"}
+                                  </span>
+                                  <span className="truncate text-muted-foreground">
+                                    {update.articleId ||
+                                      update.bulletinId ||
+                                      "—"}
+                                  </span>
+                                  <span className="text-right text-muted-foreground">
+                                    {update.percentComplete || 0}%
+                                  </span>
                                 </div>
                               ))}
-                            </div>
-                          )}
+                          </div>
+                        )}
 
-                          {!softwareCenterLoading && softwareCenter && softwareCenter.updates?.length === 0 && (
-                            <div className="rounded-lg bg-muted/35 px-3 py-2 ring-1 ring-border/40">
-                              <p className="text-xs text-muted-foreground">Nenhuma atualização pendente listada para este host.</p>
-                            </div>
-                          )}
+                      {!softwareCenterLoading &&
+                        softwareCenter &&
+                        softwareCenter.updates?.length === 0 && (
+                          <div className="rounded-lg bg-muted/35 px-3 py-2 ring-1 ring-border/40">
+                            <p className="text-xs text-muted-foreground">
+                              Nenhuma atualização pendente listada para este
+                              host.
+                            </p>
+                          </div>
+                        )}
 
-                          {softwareCenterMessage && (
-                            <MessageBox tone="success">{softwareCenterMessage}</MessageBox>
-                          )}
-                          {softwareCenterError && (
-                            <MessageBox tone="error">{softwareCenterError}</MessageBox>
-                          )}
+                      {softwareCenterMessage && (
+                        <MessageBox tone="success">
+                          {softwareCenterMessage}
+                        </MessageBox>
+                      )}
+                      {softwareCenterError && (
+                        <MessageBox tone="error">
+                          {softwareCenterError}
+                        </MessageBox>
+                      )}
 
-                          {remoteActionMessage && (
-                            <MessageBox tone="success">{remoteActionMessage}</MessageBox>
-                          )}
-                          {remoteActionError && (
-                            <MessageBox tone="error">{remoteActionError}</MessageBox>
-                          )}
-                          {remoteActionDetails && (
-                            <pre className="max-h-40 overflow-auto rounded-lg bg-background px-3 py-2 text-xs leading-5 text-muted-foreground whitespace-pre-wrap break-words ring-1 ring-border/40">
-                              {remoteActionDetails}
-                            </pre>
-                          )}
-                        </div>
-                      </section>
+                      {remoteActionMessage && (
+                        <MessageBox tone="success">
+                          {remoteActionMessage}
+                        </MessageBox>
+                      )}
+                      {remoteActionError && (
+                        <MessageBox tone="error">
+                          {remoteActionError}
+                        </MessageBox>
+                      )}
+                      {remoteActionDetails && (
+                        <pre className="max-h-40 overflow-auto rounded-lg bg-background px-3 py-2 text-xs leading-5 text-muted-foreground whitespace-pre-wrap break-words ring-1 ring-border/40">
+                          {remoteActionDetails}
+                        </pre>
+                      )}
                     </div>
-                </section>
-                </>
-              )}
-          </section>
-
-        </div>
-      </main>
-    </div>
+                  </section>
+                </div>
+              </section>
+            </>
+          )}
+      </section>
+    </PageShell>
   );
 }

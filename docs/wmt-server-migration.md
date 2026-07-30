@@ -31,7 +31,7 @@ pnpm build
 Copie a pasta do projeto para o servidor, por exemplo:
 
 ```powershell
-robocopy C:\Users\et1ribeijo\Desktop\wmt-desktop \\SERVIDOR\C$\Temp\wmt-desktop /MIR /XD node_modules src-tauri\target .venv .git
+robocopy C:\caminho\wmt-desktop \\SERVIDOR\C$\Temp\wmt-desktop /MIR /XD node_modules src-tauri\target .venv .git
 ```
 
 No servidor, abra PowerShell como Administrador dentro da pasta copiada:
@@ -89,7 +89,7 @@ Se aparecer erro do IIS relacionado a `rewrite`, instale IIS URL Rewrite + ARR e
 Depois do servidor pronto, gere o instalador desktop apontando para a URL central:
 
 ```powershell
-.\scripts\build-and-release.ps1 -Type patch -BackendUrl "http://SERVIDOR"
+.\scripts\build-and-release.ps1 -Type patch -BackendUrl "https://SERVIDOR"
 ```
 
 Com HTTPS/DNS:

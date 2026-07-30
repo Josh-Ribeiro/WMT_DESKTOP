@@ -1,14 +1,21 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { useAuth } from '@/hooks/useAuth';
-import { useLocation } from 'wouter';
-import { Sidebar } from '@/components/Sidebar';
-import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
-import { Progress } from '@/components/ui/progress';
-import { Input } from '@/components/ui/input';
-import { apiRequest } from '@/lib/api';
-import { toast } from 'sonner';
-import { BarChart2, HardDrive, Network, RefreshCw, Thermometer, Gauge, Activity } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useAuthenticatedUser } from "@/hooks/useAuth";
+import { useLocation } from "wouter";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Progress } from "@/components/ui/progress";
+import { Input } from "@/components/ui/input";
+import { apiRequest } from "@/lib/api";
+import { toast } from "sonner";
+import {
+  BarChart2,
+  HardDrive,
+  Network,
+  RefreshCw,
+  Thermometer,
+  Gauge,
+  Activity,
+} from "lucide-react";
 
 type TempSensor = {
   name: string;
@@ -21,7 +28,12 @@ type PerformanceSample = {
   host: string;
   generated_at: string;
   cpu: { usage_percent: number; queue_length: number };
-  memory: { total_gb: number; used_gb: number; free_gb: number; usage_percent: number };
+  memory: {
+    total_gb: number;
+    used_gb: number;
+    free_gb: number;
+    usage_percent: number;
+  };
   disk: {
     total_gb: number;
     used_gb: number;
@@ -55,8 +67,8 @@ type PerformanceSample = {
 };
 
 function formatBytesPerSec(value: number) {
-  if (!Number.isFinite(value) || value < 0) return '0 B/s';
-  const units = ['B/s', 'KB/s', 'MB/s', 'GB/s', 'TB/s'];
+  if (!Number.isFinite(value) || value < 0) return "0 B/s";
+  const units = ["B/s", "KB/s", "MB/s", "GB/s", "TB/s"];
   let v = value;
   let i = 0;
   while (v >= 1024 && i < units.length - 1) {
@@ -68,13 +80,20 @@ function formatBytesPerSec(value: number) {
 
 function TemperatureCard({ sensor }: { sensor: TempSensor }) {
   const c = sensor.celsius;
-  const tone = c >= 90 ? 'bg-red-500/10 text-red-600' : c >= 75 ? 'bg-amber-500/10 text-amber-700' : 'bg-emerald-500/10 text-emerald-700';
+  const tone =
+    c >= 90
+      ? "bg-red-500/10 text-red-600"
+      : c >= 75
+        ? "bg-amber-500/10 text-amber-700"
+        : "bg-emerald-500/10 text-emerald-700";
 
   return (
     <Card className={`border-border/70 bg-card/80 p-3 shadow-none ${tone}`}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="truncate text-sm font-semibold">{sensor.name || 'Sensor'}</p>
+          <p className="truncate text-sm font-semibold">
+            {sensor.name || "Sensor"}
+          </p>
           <p className="mt-0.5 text-xs opacity-80">{sensor.type}</p>
         </div>
         <div className="shrink-0 text-right">
@@ -87,15 +106,15 @@ function TemperatureCard({ sensor }: { sensor: TempSensor }) {
 }
 
 export default function HostPerformance() {
-  const { user, logout, loading: authLoading } = useAuth();
+  const user = useAuthenticatedUser();
   const [, navigate] = useLocation();
 
   const hostFromQuery = useMemo(() => {
     const sp = new URLSearchParams(window.location.search);
-    return (sp.get('host') || '').trim().toUpperCase();
+    return (sp.get("host") || "").trim().toUpperCase();
   }, []);
 
-  const [manualHost, setManualHost] = useState(hostFromQuery || '');
+  const [manualHost, setManualHost] = useState(hostFromQuery || "");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sample, setSample] = useState<PerformanceSample | null>(null);
@@ -103,9 +122,9 @@ export default function HostPerformance() {
   const requestRef = useRef(0);
 
   const doFetch = async (targetHost: string) => {
-    const normalized = (targetHost || '').trim().toUpperCase();
+    const normalized = (targetHost || "").trim().toUpperCase();
     if (!normalized) {
-      setError('Host é obrigatório.');
+      setError("Host é obrigatório.");
       return;
     }
 
@@ -115,23 +134,28 @@ export default function HostPerformance() {
     requestRef.current = requestId;
 
     try {
-      const res = await apiRequest<PerformanceSample>(`/api/performance-sample?host=${encodeURIComponent(normalized)}`);
+      const res = await apiRequest<PerformanceSample>(
+        `/api/performance-sample?host=${encodeURIComponent(normalized)}`
+      );
       if (requestRef.current !== requestId) return;
       setSample(res);
     } catch (e) {
       if (requestRef.current !== requestId) return;
-      setError(e instanceof Error ? e.message : 'Erro desconhecido ao coletar performance.');
+      setError(
+        e instanceof Error
+          ? e.message
+          : "Erro desconhecido ao coletar performance."
+      );
     } finally {
       if (requestRef.current === requestId) setLoading(false);
     }
   };
 
   useEffect(() => {
-    if (authLoading || !user) return;
     if (!hostFromQuery) return;
     void doFetch(hostFromQuery);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authLoading, user, hostFromQuery]);
+  }, [hostFromQuery]);
 
   useEffect(() => {
     if (!autoRefreshing) return;
@@ -146,7 +170,7 @@ export default function HostPerformance() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoRefreshing, hostFromQuery]);
 
-  const host = hostFromQuery || '';
+  const host = hostFromQuery || "";
   const cpuUsage = sample?.cpu?.usage_percent ?? 0;
   const memUsage = sample?.memory?.usage_percent ?? 0;
   const diskUsage = sample?.disk?.usage_percent ?? 0;
@@ -155,48 +179,59 @@ export default function HostPerformance() {
 
   const volumes = sample?.disk?.volumes ?? [];
   const safeVolumes = Array.isArray(volumes)
-    ? volumes.map((v) => ({
-        name: v?.name ?? 'Volume',
+    ? volumes.map(v => ({
+        name: v?.name ?? "Volume",
         label: v?.label ?? undefined,
-        size_gb: Number.isFinite(v?.size_gb as number) ? (v.size_gb as number) : 0,
-        free_gb: Number.isFinite(v?.free_gb as number) ? (v.free_gb as number) : 0,
-        used_gb: Number.isFinite(v?.used_gb as number) ? (v.used_gb as number) : 0,
-        usage_percent: Number.isFinite(v?.usage_percent as number) ? (v.usage_percent as number) : 0,
+        size_gb: Number.isFinite(v?.size_gb as number)
+          ? (v.size_gb as number)
+          : 0,
+        free_gb: Number.isFinite(v?.free_gb as number)
+          ? (v.free_gb as number)
+          : 0,
+        used_gb: Number.isFinite(v?.used_gb as number)
+          ? (v.used_gb as number)
+          : 0,
+        usage_percent: Number.isFinite(v?.usage_percent as number)
+          ? (v.usage_percent as number)
+          : 0,
       }))
     : [];
 
-
-  const handleLogout = async () => {
-    await logout();
-    navigate('/login');
-  };
-
-  if (authLoading) return null;
-  if (!user) {
-    navigate('/login');
-    return null;
-  }
-
   return (
-    <div className="flex h-screen bg-background">
-      <Sidebar user={user.username} permissions={user.permissions} onLogout={handleLogout} />
-      <main className="min-w-0 flex-1 overflow-auto">
+    <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background">
+      <main className="h-full min-w-0 flex-1 overflow-auto">
         <div className="mx-auto w-full max-w-7xl space-y-6 p-4 sm:p-6 lg:p-8">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="wmt-header flex flex-col gap-4 rounded-xl border p-5 text-slate-100 shadow-lg sm:flex-row sm:items-center sm:justify-between">
             <div className="min-w-0">
-              <h1 className="flex items-center gap-2 text-3xl font-bold text-foreground">
+              <h1 className="flex items-center gap-2 text-3xl font-bold text-white">
                 <BarChart2 size={22} /> Monitor de desempenho
               </h1>
-              <p className="mt-1 text-sm text-muted-foreground">CPU, Memória, Disco, Rede e Temperatura (quando disponível)</p>
+              <p className="mt-1 text-sm text-slate-400">
+                CPU, Memória, Disco, Rede e Temperatura (quando disponível)
+              </p>
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
-              <Button variant="outline" size="sm" disabled={loading || !host} onClick={() => void doFetch(host)}>
-                {loading ? <RefreshCw className="mr-2 animate-spin" size={16} /> : <RefreshCw className="mr-2" size={16} />}
-                {loading ? 'Coletando...' : 'Atualizar'}
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={loading || !host}
+                onClick={() => void doFetch(host)}
+              >
+                {loading ? (
+                  <RefreshCw className="mr-2 animate-spin" size={16} />
+                ) : (
+                  <RefreshCw className="mr-2" size={16} />
+                )}
+                {loading ? "Coletando..." : "Atualizar"}
               </Button>
-              <Button variant={autoRefreshing ? 'default' : 'outline'} size="sm" disabled={!host} onClick={() => setAutoRefreshing((v) => !v)}>
-                {autoRefreshing ? 'Auto: ON' : 'Auto: OFF'}
+              <Button
+                variant={autoRefreshing ? "default" : "outline"}
+                size="sm"
+                disabled={!host}
+                onClick={() => setAutoRefreshing(v => !v)}
+              >
+                {autoRefreshing ? "Auto: ON" : "Auto: OFF"}
               </Button>
             </div>
           </div>
@@ -204,14 +239,23 @@ export default function HostPerformance() {
           <Card className="border-border/70 bg-card p-4 shadow-none">
             <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
               <div>
-                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Host</p>
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Host
+                </p>
                 <div className="mt-1 flex gap-2">
-                  <Input value={manualHost} onChange={(e) => setManualHost(e.target.value)} placeholder="Ex.: PC-01 ou 192.168.0.10" className="bg-background" />
+                  <Input
+                    value={manualHost}
+                    onChange={e => setManualHost(e.target.value)}
+                    placeholder="Ex.: PC-01 ou 192.168.0.10"
+                    className="bg-background"
+                  />
                   <Button
                     onClick={() => {
                       const h = manualHost.trim().toUpperCase();
                       if (!h) return;
-                      navigate(`/monitor-temps?host=${encodeURIComponent(h)}` as any);
+                      navigate(
+                        `/monitor-temps?host=${encodeURIComponent(h)}` as any
+                      );
                       setError(null);
                       setSample(null);
                     }}
@@ -221,10 +265,18 @@ export default function HostPerformance() {
                   </Button>
                 </div>
               </div>
-              <div className="text-xs text-muted-foreground">{sample?.generated_at ? `Última coleta: ${new Date(sample.generated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : '—'}</div>
+              <div className="text-xs text-muted-foreground">
+                {sample?.generated_at
+                  ? `Última coleta: ${new Date(sample.generated_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
+                  : "—"}
+              </div>
             </div>
 
-            {error && <div className="mt-3 rounded-lg bg-red-50 p-3 text-sm text-red-800 ring-1 ring-red-200 dark:bg-red-950/20 dark:text-red-200">{error}</div>}
+            {error && (
+              <div className="mt-3 rounded-lg bg-red-50 p-3 text-sm text-red-800 ring-1 ring-red-200 dark:bg-red-950/20 dark:text-red-200">
+                {error}
+              </div>
+            )}
           </Card>
 
           <div className="grid gap-4 lg:grid-cols-3">
@@ -232,7 +284,9 @@ export default function HostPerformance() {
               <div className="flex items-center gap-2">
                 <Activity size={18} className="text-muted-foreground" />
                 <p className="text-sm font-semibold text-foreground">CPU</p>
-                <span className="ml-auto rounded-full bg-background px-2 py-0.5 text-xs text-muted-foreground ring-1 ring-border/40">{cpuUsage}%</span>
+                <span className="ml-auto rounded-full bg-background px-2 py-0.5 text-xs text-muted-foreground ring-1 ring-border/40">
+                  {cpuUsage}%
+                </span>
               </div>
               <div className="mt-3">
                 <Progress value={cpuUsage} />
@@ -243,7 +297,9 @@ export default function HostPerformance() {
                   </div>
                   <div>
                     <p>Queue</p>
-                    <p className="font-semibold text-foreground">{sample?.cpu.queue_length ?? 0}</p>
+                    <p className="font-semibold text-foreground">
+                      {sample?.cpu.queue_length ?? 0}
+                    </p>
                   </div>
                 </div>
               </div>
@@ -253,18 +309,24 @@ export default function HostPerformance() {
               <div className="flex items-center gap-2">
                 <Gauge size={18} className="text-muted-foreground" />
                 <p className="text-sm font-semibold text-foreground">Memória</p>
-                <span className="ml-auto rounded-full bg-background px-2 py-0.5 text-xs text-muted-foreground ring-1 ring-border/40">{memUsage}%</span>
+                <span className="ml-auto rounded-full bg-background px-2 py-0.5 text-xs text-muted-foreground ring-1 ring-border/40">
+                  {memUsage}%
+                </span>
               </div>
               <div className="mt-3">
                 <Progress value={memUsage} />
                 <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-muted-foreground">
                   <div>
                     <p>Total</p>
-                    <p className="font-semibold text-foreground">{sample ? `${sample.memory.total_gb.toFixed(2)} GB` : '—'}</p>
+                    <p className="font-semibold text-foreground">
+                      {sample ? `${sample.memory.total_gb.toFixed(2)} GB` : "—"}
+                    </p>
                   </div>
                   <div>
                     <p>Livre</p>
-                    <p className="font-semibold text-foreground">{sample ? `${sample.memory.free_gb.toFixed(2)} GB` : '—'}</p>
+                    <p className="font-semibold text-foreground">
+                      {sample ? `${sample.memory.free_gb.toFixed(2)} GB` : "—"}
+                    </p>
                   </div>
                 </div>
               </div>
@@ -273,19 +335,27 @@ export default function HostPerformance() {
             <Card className="border-border/70 bg-card/90 p-4 shadow-none lg:col-span-1">
               <div className="flex items-center gap-2">
                 <HardDrive size={18} className="text-muted-foreground" />
-                <p className="text-sm font-semibold text-foreground">Disco (total)</p>
-                <span className="ml-auto rounded-full bg-background px-2 py-0.5 text-xs text-muted-foreground ring-1 ring-border/40">{diskUsage}%</span>
+                <p className="text-sm font-semibold text-foreground">
+                  Disco (total)
+                </p>
+                <span className="ml-auto rounded-full bg-background px-2 py-0.5 text-xs text-muted-foreground ring-1 ring-border/40">
+                  {diskUsage}%
+                </span>
               </div>
               <div className="mt-3">
                 <Progress value={diskUsage} />
                 <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-muted-foreground">
                   <div>
                     <p>Usado</p>
-                    <p className="font-semibold text-foreground">{sample ? `${sample.disk.used_gb.toFixed(2)} GB` : '—'}</p>
+                    <p className="font-semibold text-foreground">
+                      {sample ? `${sample.disk.used_gb.toFixed(2)} GB` : "—"}
+                    </p>
                   </div>
                   <div>
                     <p>Disponível</p>
-                    <p className="font-semibold text-foreground">{sample ? `${sample.disk.free_gb.toFixed(2)} GB` : '—'}</p>
+                    <p className="font-semibold text-foreground">
+                      {sample ? `${sample.disk.free_gb.toFixed(2)} GB` : "—"}
+                    </p>
                   </div>
                 </div>
               </div>
@@ -302,33 +372,59 @@ export default function HostPerformance() {
               <div className="mt-3 grid gap-3 sm:grid-cols-3">
                 <div className="rounded-lg bg-background/60 p-3 ring-1 ring-border/40">
                   <p className="text-xs text-muted-foreground">Total</p>
-                  <p className="mt-1 text-base font-bold">{sample ? formatBytesPerSec(sample.network.bytes_per_sec) : '—'}</p>
+                  <p className="mt-1 text-base font-bold">
+                    {sample
+                      ? formatBytesPerSec(sample.network.bytes_per_sec)
+                      : "—"}
+                  </p>
                 </div>
                 <div className="rounded-lg bg-background/60 p-3 ring-1 ring-border/40">
                   <p className="text-xs text-muted-foreground">Recebido</p>
-                  <p className="mt-1 text-base font-bold">{sample ? formatBytesPerSec(sample.network.received_bytes_per_sec) : '—'}</p>
+                  <p className="mt-1 text-base font-bold">
+                    {sample
+                      ? formatBytesPerSec(sample.network.received_bytes_per_sec)
+                      : "—"}
+                  </p>
                 </div>
                 <div className="rounded-lg bg-background/60 p-3 ring-1 ring-border/40">
                   <p className="text-xs text-muted-foreground">Enviado</p>
-                  <p className="mt-1 text-base font-bold">{sample ? formatBytesPerSec(sample.network.sent_bytes_per_sec) : '—'}</p>
+                  <p className="mt-1 text-base font-bold">
+                    {sample
+                      ? formatBytesPerSec(sample.network.sent_bytes_per_sec)
+                      : "—"}
+                  </p>
                 </div>
               </div>
 
               <div className="mt-4">
-                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Interfaces</p>
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Interfaces
+                </p>
                 <div className="mt-2 space-y-2">
-                  {(sample?.network.interfaces || []).map((iface) => (
-                    <div key={iface.name} className="flex items-center justify-between rounded-lg bg-background/50 p-2 text-xs ring-1 ring-border/40">
+                  {(sample?.network.interfaces || []).map(iface => (
+                    <div
+                      key={iface.name}
+                      className="flex items-center justify-between rounded-lg bg-background/50 p-2 text-xs ring-1 ring-border/40"
+                    >
                       <div className="min-w-0">
-                        <p className="truncate font-medium text-foreground">{iface.name}</p>
+                        <p className="truncate font-medium text-foreground">
+                          {iface.name}
+                        </p>
                       </div>
                       <div className="text-right text-muted-foreground">
                         <div>{formatBytesPerSec(iface.bytes_per_sec)}</div>
-                        <div className="opacity-80">R: {formatBytesPerSec(iface.received_bytes_per_sec)} • S: {formatBytesPerSec(iface.sent_bytes_per_sec)}</div>
+                        <div className="opacity-80">
+                          R: {formatBytesPerSec(iface.received_bytes_per_sec)} •
+                          S: {formatBytesPerSec(iface.sent_bytes_per_sec)}
+                        </div>
                       </div>
                     </div>
                   ))}
-                  {!sample?.network.interfaces?.length && <p className="text-xs text-muted-foreground">Sem dados de interfaces.</p>}
+                  {!sample?.network.interfaces?.length && (
+                    <p className="text-xs text-muted-foreground">
+                      Sem dados de interfaces.
+                    </p>
+                  )}
                 </div>
               </div>
             </Card>
@@ -336,20 +432,31 @@ export default function HostPerformance() {
             <Card className="border-border/70 bg-card p-4 shadow-none">
               <div className="flex items-center gap-2">
                 <HardDrive size={18} className="text-muted-foreground" />
-                <p className="text-sm font-semibold text-foreground">Volumetria</p>
+                <p className="text-sm font-semibold text-foreground">
+                  Volumetria
+                </p>
               </div>
 
               <div className="mt-4 space-y-2">
-                {safeVolumes.slice(0, 8).map((v) => (
-                  <div key={v.name} className="rounded-lg bg-background/50 p-3 ring-1 ring-border/40">
+                {safeVolumes.slice(0, 8).map(v => (
+                  <div
+                    key={v.name}
+                    className="rounded-lg bg-background/50 p-3 ring-1 ring-border/40"
+                  >
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
-                        <p className="truncate text-sm font-semibold">{v.label || v.name || 'Volume'}</p>
-                        <p className="text-xs text-muted-foreground">{v.name}</p>
+                        <p className="truncate text-sm font-semibold">
+                          {v.label || v.name || "Volume"}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {v.name}
+                        </p>
                       </div>
                       <div className="shrink-0 text-right">
                         <p className="text-sm font-bold">{v.usage_percent}%</p>
-                        <p className="text-xs text-muted-foreground">{v.free_gb.toFixed(2)} GB livres</p>
+                        <p className="text-xs text-muted-foreground">
+                          {v.free_gb.toFixed(2)} GB livres
+                        </p>
                       </div>
                     </div>
                     <div className="mt-2">
@@ -357,8 +464,11 @@ export default function HostPerformance() {
                     </div>
                   </div>
                 ))}
-                {!safeVolumes.length && <p className="text-xs text-muted-foreground">Sem dados de volumes.</p>}
-
+                {!safeVolumes.length && (
+                  <p className="text-xs text-muted-foreground">
+                    Sem dados de volumes.
+                  </p>
+                )}
               </div>
             </Card>
           </div>
@@ -366,18 +476,31 @@ export default function HostPerformance() {
           <Card className="border-border/70 bg-card p-4 shadow-none">
             <div className="flex items-center gap-2">
               <Thermometer size={18} className="text-muted-foreground" />
-              <p className="text-sm font-semibold text-foreground">Temperatura</p>
-              <span className="ml-auto rounded-full bg-background px-2 py-0.5 text-xs text-muted-foreground ring-1 ring-border/40">{tempsAvailable ? `${tempsSensors.length} sensor(es)` : 'indisponível'}</span>
+              <p className="text-sm font-semibold text-foreground">
+                Temperatura
+              </p>
+              <span className="ml-auto rounded-full bg-background px-2 py-0.5 text-xs text-muted-foreground ring-1 ring-border/40">
+                {tempsAvailable
+                  ? `${tempsSensors.length} sensor(es)`
+                  : "indisponível"}
+              </span>
             </div>
 
-            {sample?.temperatures?.message && <p className="mt-2 text-xs text-muted-foreground">{sample.temperatures.message}</p>}
+            {sample?.temperatures?.message && (
+              <p className="mt-2 text-xs text-muted-foreground">
+                {sample.temperatures.message}
+              </p>
+            )}
 
             <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {tempsAvailable && tempsSensors.length ? (
-                tempsSensors.map((s, idx) => <TemperatureCard key={`${s.name}-${idx}`} sensor={s} />)
+                tempsSensors.map((s, idx) => (
+                  <TemperatureCard key={`${s.name}-${idx}`} sensor={s} />
+                ))
               ) : (
                 <div className="rounded-lg border border-dashed border-border/70 p-6 text-center text-xs text-muted-foreground">
-                  Nenhuma temperatura retornada (WMI/ACPI). Dependendo do modelo, pode não existir.
+                  Nenhuma temperatura retornada (WMI/ACPI). Dependendo do
+                  modelo, pode não existir.
                 </div>
               )}
             </div>
@@ -387,4 +510,3 @@ export default function HostPerformance() {
     </div>
   );
 }
-
