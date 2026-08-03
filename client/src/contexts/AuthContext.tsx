@@ -12,6 +12,7 @@ import {
   apiRequest,
   clearStoredSession,
   setCsrfToken,
+  setSessionToken,
 } from "@/lib/api";
 
 export interface User {
@@ -37,6 +38,7 @@ export interface AuthContextValue {
 interface AuthPayload extends Partial<User> {
   user?: string;
   csrf_token?: string;
+  access_token?: string;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -79,6 +81,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const storeAuth = useCallback((data: AuthPayload) => {
     setCsrfToken(data.csrf_token);
+    setSessionToken(data.access_token);
     setUser(userFromPayload(data));
   }, []);
 

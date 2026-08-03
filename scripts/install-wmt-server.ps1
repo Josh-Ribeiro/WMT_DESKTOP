@@ -43,6 +43,33 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# WebAdministration depends on the legacy IIS PowerShell provider. In PowerShell
+# 7 it is loaded through WinPSCompatSession (which cannot expose the IIS: drive),
+# and newer releases cannot load it in-process even with -SkipEditionCheck.
+if (($PSVersionTable.PSEdition -eq "Core") -and (-not $SkipIis)) {
+    $windowsPowerShell = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
+    if (-not (Test-Path $windowsPowerShell)) {
+        throw "Windows PowerShell 5.1 nao encontrado. Ele e necessario para configurar o IIS."
+    }
+
+    Write-Host "Reiniciando a instalacao no Windows PowerShell 5.1 para configurar o IIS..." -ForegroundColor Yellow
+    $relaunchArguments = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $PSCommandPath)
+    foreach ($parameter in $PSBoundParameters.GetEnumerator()) {
+        if ($parameter.Value -is [System.Management.Automation.SwitchParameter]) {
+            if ($parameter.Value.IsPresent) {
+                $relaunchArguments += "-$($parameter.Key)"
+            }
+        }
+        else {
+            $relaunchArguments += "-$($parameter.Key)"
+            $relaunchArguments += [string]$parameter.Value
+        }
+    }
+
+    & $windowsPowerShell @relaunchArguments
+    exit $LASTEXITCODE
+}
+
 function Write-Step {
     param([string]$Message)
     Write-Host "`n== $Message ==" -ForegroundColor Cyan
@@ -126,8 +153,18 @@ function Ensure-PythonVenv {
     }
 
     $pipExe = Join-Path $venvPath "Scripts\pip.exe"
-    & $pythonExe -m pip install --upgrade pip
-    & $pipExe install -r (Join-Path $TargetRoot "backend\requirements.txt")
+    & $pythonExe -m pip install --upgrade pip | Out-Host
+    if ($LASTEXITCODE -ne 0) {
+        throw "Falha ao atualizar o pip no ambiente virtual (codigo $LASTEXITCODE)."
+    }
+
+    & $pipExe install -r (Join-Path $TargetRoot "backend\requirements.txt") | Out-Host
+    if ($LASTEXITCODE -ne 0) {
+        throw "Falha ao instalar as dependencias do backend (codigo $LASTEXITCODE)."
+    }
+
+    # This function is assigned to $pythonExe by the caller. Keep native command
+    # output out of PowerShell's success stream so only this path is returned.
     return $pythonExe
 }
 
@@ -202,6 +239,12 @@ function Set-MachineEnv {
     [Environment]::SetEnvironmentVariable("WMT_SSO_DEFAULT_ROLE", $DefaultRole, "Machine")
     [Environment]::SetEnvironmentVariable("WMT_CORS_ORIGINS", $PublicUrlValue.TrimEnd("/"), "Machine")
 
+    $publicUri = [Uri]$PublicUrlValue
+    $usesHttps = $publicUri.Scheme -eq "https"
+    [Environment]::SetEnvironmentVariable("WMT_SESSION_COOKIE_SECURE", $usesHttps.ToString().ToLowerInvariant(), "Machine")
+    [Environment]::SetEnvironmentVariable("WMT_SESSION_COOKIE_SAMESITE", $(if ($usesHttps) { "none" } else { "lax" }), "Machine")
+    [Environment]::SetEnvironmentVariable("WMT_ALLOW_BEARER_AUTH", (-not $usesHttps).ToString().ToLowerInvariant(), "Machine")
+
     if ($AllowedGroups) {
         [Environment]::SetEnvironmentVariable("WMT_SSO_ALLOWED_GROUPS", $AllowedGroups, "Machine")
     }
@@ -214,7 +257,10 @@ function Set-MachineEnv {
 }
 
 function Install-IisFeatures {
-    if (Get-Command Install-WindowsFeature -ErrorAction SilentlyContinue) {
+    $operatingSystem = Get-CimInstance -ClassName Win32_OperatingSystem
+    $isWindowsServer = $operatingSystem.ProductType -ne 1
+
+    if ($isWindowsServer -and (Get-Command Install-WindowsFeature -ErrorAction SilentlyContinue)) {
         Install-WindowsFeature Web-Server, Web-Mgmt-Console, Web-Windows-Auth, Web-Static-Content, Web-Default-Doc, Web-Http-Errors, Web-Filtering | Out-Null
     }
     else {
@@ -265,7 +311,11 @@ function Configure-IisSite {
         [string]$BackendUrl
     )
 
-    Import-Module WebAdministration -Force
+    Import-Module WebAdministration -Force -ErrorAction Stop
+
+    if (-not (Get-PSDrive -Name IIS -ErrorAction SilentlyContinue)) {
+        throw "O modulo WebAdministration foi carregado, mas o drive IIS: nao esta disponivel. Rode o script no Windows PowerShell 5.1 (powershell.exe)."
+    }
 
     $sitePath = Join-Path $TargetRoot "dist\public"
     if (-not (Test-Path (Join-Path $sitePath "index.html"))) {
@@ -283,7 +333,7 @@ function Configure-IisSite {
     Add-AllowedServerVariable "HTTP_X_FORWARDED_HOST"
 
     if (-not (Test-Path "IIS:\AppPools\$Name")) {
-        New-WebAppPool -Name $Name | Out-Null
+        New-WebAppPool -Name $Name -Force | Out-Null
     }
     Set-ItemProperty "IIS:\AppPools\$Name" -Name managedRuntimeVersion -Value ""
 
@@ -348,6 +398,10 @@ function Configure-IisSite {
     </defaultDocument>
     <rewrite>
       <rules>
+        <rule name="WMT health to backend" stopProcessing="true">
+          <match url="^(health(?:/.*)?)$" />
+          <action type="Rewrite" url="$BackendUrl/{R:1}" />
+        </rule>
         <rule name="WMT API to backend" stopProcessing="true">
           <match url="^api/(.*)$" />
           <action type="Rewrite" url="$BackendUrl/api/{R:1}" />
@@ -378,7 +432,7 @@ function Configure-IisSite {
 function Test-BackendHealth {
     param([int]$Port)
 
-    $healthUrl = "http://127.0.0.1:$Port/api/health"
+    $healthUrl = "http://127.0.0.1:$Port/health/ready"
     for ($i = 0; $i -lt 20; $i++) {
         try {
             Invoke-RestMethod -Uri $healthUrl -TimeoutSec 2 | Out-Null

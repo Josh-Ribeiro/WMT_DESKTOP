@@ -1,6 +1,6 @@
 [package]
 name = "wmt-desktop"
-version = "1.0.123"
+version = "1.0.127"
 description = "WMT Desktop - Workstation Manager Tools"
 authors = ["WMT Team"]
 edition = "2021"
@@ -21,4 +21,5 @@ lto = true
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-dialog = "2"
 tauri-plugin-updater = "2"
+
 

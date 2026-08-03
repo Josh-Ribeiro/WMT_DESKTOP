@@ -9,6 +9,7 @@ export const API_BASE_URL = (
 
 const inflightGetRequests = new Map<string, Promise<unknown>>();
 let csrfToken = "";
+let bearerToken = "";
 let csrfRefresh: Promise<boolean> | null = null;
 
 export class UnauthorizedError extends Error {
@@ -22,8 +23,13 @@ export function setCsrfToken(value?: string) {
   csrfToken = value || "";
 }
 
+export function setSessionToken(value?: string) {
+  bearerToken = value || "";
+}
+
 export function clearStoredSession() {
   csrfToken = "";
+  bearerToken = "";
   // Remove credentials/profile left by versions that used localStorage.
   localStorage.removeItem("wmt_user");
   localStorage.removeItem("wmt_token");
@@ -87,6 +93,9 @@ export async function apiFetch(
 
   if (!headers.has("Content-Type") && options.body) {
     headers.set("Content-Type", "application/json");
+  }
+  if (bearerToken) {
+    headers.set("Authorization", `Bearer ${bearerToken}`);
   }
   if (isUnsafeMethod(method) && csrfToken) {
     headers.set("X-CSRF-Token", csrfToken);

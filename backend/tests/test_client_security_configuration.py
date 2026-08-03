@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import unittest
 from pathlib import Path
 
@@ -23,15 +24,26 @@ class ClientSecurityConfigurationTests(unittest.TestCase):
         self.assertIsInstance(csp, str)
         self.assertIn("object-src 'none'", csp)
         self.assertIn("script-src 'self'", csp)
-        self.assertFalse(updater["dangerousInsecureTransportProtocol"])
-        self.assertTrue(
-            all(
-                endpoint.startswith("https://")
-                for endpoint in updater["endpoints"]
-            )
+        insecure_build = (
+            os.getenv("WMT_ALLOW_INSECURE_HTTP_BUILD", "").lower() == "true"
         )
+        has_http_endpoint = any(
+            endpoint.startswith("http://") for endpoint in updater["endpoints"]
+        )
+        self.assertEqual(
+            has_http_endpoint,
+            updater["dangerousInsecureTransportProtocol"],
+        )
+        if not insecure_build:
+            self.assertFalse(has_http_endpoint)
+            self.assertTrue(
+                all(
+                    endpoint.startswith("https://")
+                    for endpoint in updater["endpoints"]
+                )
+            )
 
-    def test_frontend_does_not_persist_or_send_bearer_token(self) -> None:
+    def test_frontend_keeps_bearer_token_in_memory_only(self) -> None:
         client_source = "\n".join(
             path.read_text(encoding="utf-8")
             for path in (ROOT / "client" / "src").rglob("*")
@@ -40,7 +52,8 @@ class ClientSecurityConfigurationTests(unittest.TestCase):
 
         self.assertNotIn("localStorage.setItem('wmt_token'", client_source)
         self.assertNotIn("localStorage.getItem('wmt_token'", client_source)
-        self.assertNotIn("Authorization: `Bearer", client_source)
+        self.assertIn('let bearerToken = ""', client_source)
+        self.assertIn('headers.set("Authorization", `Bearer ${bearerToken}`)', client_source)
 
     def test_production_api_url_uses_https(self) -> None:
         production_env = (ROOT / ".env.production").read_text(encoding="utf-8")
@@ -53,6 +66,7 @@ class ClientSecurityConfigurationTests(unittest.TestCase):
             headers={
                 "Origin": "https://tauri.localhost",
                 "Access-Control-Request-Method": "GET",
+                "Access-Control-Request-Headers": "Authorization",
             },
         )
 
@@ -64,6 +78,10 @@ class ClientSecurityConfigurationTests(unittest.TestCase):
         self.assertEqual(
             "true",
             response.headers["access-control-allow-credentials"],
+        )
+        self.assertIn(
+            "Authorization",
+            response.headers["access-control-allow-headers"],
         )
 
     def test_opaque_and_arbitrary_local_origins_are_rejected(self) -> None:
@@ -216,7 +234,11 @@ class ClientSecurityConfigurationTests(unittest.TestCase):
             path.read_text(encoding="utf-8-sig") for path in runtime_files
         )
 
-        self.assertNotIn("WKS" + "048-", combined)
+        insecure_build = (
+            os.getenv("WMT_ALLOW_INSECURE_HTTP_BUILD", "").lower() == "true"
+        )
+        if not insecure_build:
+            self.assertNotIn("WKS" + "048-", combined)
         self.assertNotRegex(combined, r"C:\\Users\\[^\\]+\\")
 
     def test_release_script_defaults_to_central_and_supports_sidecar(self) -> None:

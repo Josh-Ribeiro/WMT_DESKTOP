@@ -13,6 +13,9 @@ de qualidade e seguranca nunca sao ignoradas.
 .PARAMETER BackendUrl
 URL HTTPS do backend usada pelo app empacotado. Ex: https://wmt.empresa.local
 
+.PARAMETER AllowInsecureHttp
+Permite HTTP para backend e updater. Use somente em uma rede interna confiavel.
+
 .PARAMETER UpdateEndpoint
 Endpoint do updater. Se omitido, usa BackendUrl + /api/updates/latest.json
 
@@ -48,11 +51,13 @@ param(
     [string]$ReleaseNotes = "",
     [string]$ReleaseNotesFile = "",
     [switch]$SkipReleaseNotesPrompt,
+    [switch]$AllowInsecureHttp,
     [switch]$SkipTest,
     [switch]$Help
 )
 
 $ErrorActionPreference = "Stop"
+$env:WMT_ALLOW_INSECURE_HTTP_BUILD = if ($AllowInsecureHttp) { "true" } else { "false" }
 
 function Write-Header {
     param([string]$Message)
@@ -77,6 +82,38 @@ function Write-Warning-Custom {
     Write-Host "[WARN] $Message" -ForegroundColor Yellow
 }
 
+# The trap below applies to the entire script scope, including errors raised
+# before execution reaches its textual declaration. Define the cleanup function
+# before any validation can throw so the original error is never masked.
+$script:DebugTauriConfigApplied = $false
+function Restore-ProductionTauriConfig {
+    if (-not $script:DebugTauriConfigApplied -or -not $tauriConfProdSnapshot) {
+        return
+    }
+
+    $tauriConf = Get-Content $tauriConfPath -Raw | ConvertFrom-Json
+    $tauriConf.productName = $tauriConfProdSnapshot.productName
+    $tauriConf.identifier = $tauriConfProdSnapshot.identifier
+    if ($tauriConf.app.windows -and $tauriConf.app.windows.Count -gt 0 -and $tauriConfProdSnapshot.app.windows -and $tauriConfProdSnapshot.app.windows.Count -gt 0) {
+        $tauriConf.app.windows[0].title = $tauriConfProdSnapshot.app.windows[0].title
+    }
+    if ($tauriConfProdSnapshot.plugins.updater.endpoints) {
+        $tauriConf.plugins.updater.endpoints = $tauriConfProdSnapshot.plugins.updater.endpoints
+    }
+    $tauriConf.app.security.csp = $tauriConfProdSnapshot.app.security.csp
+    $tauriConf.plugins.updater.dangerousInsecureTransportProtocol = $tauriConfProdSnapshot.plugins.updater.dangerousInsecureTransportProtocol
+    $tauriConf.bundle.createUpdaterArtifacts = $tauriConfProdSnapshot.bundle.createUpdaterArtifacts
+    if ($tauriConfProdSnapshot.bundle.PSObject.Properties.Name -contains "externalBin") {
+        $tauriConf.bundle.externalBin = $tauriConfProdSnapshot.bundle.externalBin
+    }
+    elseif ($tauriConf.bundle.PSObject.Properties.Name -contains "externalBin") {
+        $tauriConf.bundle.PSObject.Properties.Remove("externalBin")
+    }
+    $tauriConf | ConvertTo-Json -Depth 20 | Out-File $tauriConfPath -Encoding UTF8
+    $script:DebugTauriConfigApplied = $false
+    Write-Success "Config Tauri de producao restaurada apos build debug."
+}
+
 if ($Help) {
     $helpMessage = @(
         "DESCRICAO:",
@@ -98,6 +135,7 @@ if ($Help) {
         "  -ReleaseNotes              Texto exibido no aviso de atualizacao",
         "  -ReleaseNotesFile          Arquivo TXT/Markdown com as notas da atualizacao",
         "  -SkipReleaseNotesPrompt    Nao pergunta as notas durante o build",
+        "  -AllowInsecureHttp         Permite backend/updater HTTP em rede interna",
         "  -SkipTest                  Pula somente a instalacao manual do MSI",
         "  -Help                      Mostra esta ajuda",
         "",
@@ -108,6 +146,7 @@ if ($Help) {
         "  .\build-and-release.ps1 -Type patch -ReleaseNotes ""Busca universal mais rapida e correcoes no monitor.""",
         "  .\build-and-release.ps1 -Type patch -ReleaseNotesFile .\notas.md",
         "  .\build-and-release.ps1 -BackendUrl https://wmt.empresa.local",
+        "  .\build-and-release.ps1 -BackendUrl http://WMT-SERVER -AllowInsecureHttp",
         "  .\build-and-release.ps1 -BackendUrl https://wmt.empresa.local -UpdateEndpoint https://wmt.empresa.local/api/updates/latest.json",
         "  .\build-and-release.ps1 -BackendMode sidecar -Channel debug -UpdateEndpoint https://wmt.empresa.local/api/updates/latest-debug.json",
         "  .\build-and-release.ps1 -Channel debug -BackendUrl http://127.0.0.1:8000 -UpdateEndpoint https://wmt.empresa.local/api/updates/latest-debug.json"
@@ -170,12 +209,19 @@ if ($BackendMode -eq "sidecar") {
 
 if ($EffectiveBackendUrl -and -not $EffectiveBackendUrl.StartsWith("https://", [System.StringComparison]::OrdinalIgnoreCase)) {
     $allowedLoopback = ($Channel -eq "debug" -or $BackendMode -eq "sidecar") -and (Test-LoopbackUrl $EffectiveBackendUrl)
-    if (-not $allowedLoopback) {
-        throw "BackendUrl deve usar HTTPS. HTTP e permitido somente para loopback em debug/sidecar."
+    $allowedInsecureHttp = $AllowInsecureHttp -and $EffectiveBackendUrl.StartsWith("http://", [System.StringComparison]::OrdinalIgnoreCase)
+    if (-not $allowedLoopback -and -not $allowedInsecureHttp) {
+        throw "BackendUrl deve usar HTTPS. Para HTTP em rede interna, informe -AllowInsecureHttp."
     }
 }
 if ($EffectiveUpdateEndpoint -and -not $EffectiveUpdateEndpoint.StartsWith("https://", [System.StringComparison]::OrdinalIgnoreCase)) {
-    throw "UpdateEndpoint deve usar HTTPS."
+    $allowedInsecureUpdate = $AllowInsecureHttp -and $EffectiveUpdateEndpoint.StartsWith("http://", [System.StringComparison]::OrdinalIgnoreCase)
+    if (-not $allowedInsecureUpdate) {
+        throw "UpdateEndpoint deve usar HTTPS. Para HTTP em rede interna, informe -AllowInsecureHttp."
+    }
+}
+if ($AllowInsecureHttp -and (($EffectiveBackendUrl -like "http://*") -or ($EffectiveUpdateEndpoint -like "http://*"))) {
+    Write-Warning-Custom "HTTP sem criptografia habilitado. Credenciais e trafego podem ser interceptados na rede."
 }
 
 $updaterPrivateKeyPath = Resolve-Path ".\secrets\wmt-updater.key" -ErrorAction SilentlyContinue
@@ -200,35 +246,6 @@ $cargoTomlPath = ".\src-tauri\Cargo.toml"
 $backendConfigPath = ".\backend\app\core\config.py"
 $tauriConfOriginal = if (Test-Path $tauriConfPath) { Get-Content $tauriConfPath -Raw } else { "" }
 $tauriConfProdSnapshot = if ($tauriConfOriginal) { $tauriConfOriginal | ConvertFrom-Json } else { $null }
-$script:DebugTauriConfigApplied = $false
-
-function Restore-ProductionTauriConfig {
-    if (-not $script:DebugTauriConfigApplied -or -not $tauriConfProdSnapshot) {
-        return
-    }
-
-    $tauriConf = Get-Content $tauriConfPath -Raw | ConvertFrom-Json
-    $tauriConf.productName = $tauriConfProdSnapshot.productName
-    $tauriConf.identifier = $tauriConfProdSnapshot.identifier
-    if ($tauriConf.app.windows -and $tauriConf.app.windows.Count -gt 0 -and $tauriConfProdSnapshot.app.windows -and $tauriConfProdSnapshot.app.windows.Count -gt 0) {
-        $tauriConf.app.windows[0].title = $tauriConfProdSnapshot.app.windows[0].title
-    }
-    if ($tauriConfProdSnapshot.plugins.updater.endpoints) {
-        $tauriConf.plugins.updater.endpoints = $tauriConfProdSnapshot.plugins.updater.endpoints
-    }
-    $tauriConf.app.security.csp = $tauriConfProdSnapshot.app.security.csp
-    $tauriConf.plugins.updater.dangerousInsecureTransportProtocol = $tauriConfProdSnapshot.plugins.updater.dangerousInsecureTransportProtocol
-    $tauriConf.bundle.createUpdaterArtifacts = $tauriConfProdSnapshot.bundle.createUpdaterArtifacts
-    if ($tauriConfProdSnapshot.bundle.PSObject.Properties.Name -contains "externalBin") {
-        $tauriConf.bundle.externalBin = $tauriConfProdSnapshot.bundle.externalBin
-    }
-    elseif ($tauriConf.bundle.PSObject.Properties.Name -contains "externalBin") {
-        $tauriConf.bundle.PSObject.Properties.Remove("externalBin")
-    }
-    $tauriConf | ConvertTo-Json -Depth 20 | Out-File $tauriConfPath -Encoding UTF8
-    $script:DebugTauriConfigApplied = $false
-    Write-Success "Config Tauri de producao restaurada apos build debug."
-}
 
 trap {
     Restore-ProductionTauriConfig
@@ -237,7 +254,7 @@ trap {
 
 if ($Channel -eq "prod" -and $BackendMode -eq "central") {
     if (-not $EffectiveBackendUrl) {
-        throw "Build de produção central exige -BackendUrl com a URL HTTPS real do servidor."
+        throw "Build de produção central exige -BackendUrl com a URL real do servidor."
     }
     if (Test-PlaceholderUrl $EffectiveBackendUrl) {
         throw "BackendUrl de produção não pode usar o domínio reservado example.com."
@@ -302,6 +319,10 @@ if ($Type) {
     $package = Get-Content $packagePath -Raw | ConvertFrom-Json
     $package.version = $newVersion
     $package | ConvertTo-Json -Depth 10 | Out-File $packagePath -Encoding UTF8
+    & corepack pnpm exec prettier --write $packagePath
+    if ($LASTEXITCODE -ne 0) {
+        throw "Falha ao formatar package.json apos atualizar a versao."
+    }
 
     $cargoToml = Get-Content $cargoTomlPath -Raw
     $cargoToml = $cargoToml -replace '(?m)^(version\s*=\s*")[^"]+(")', "`${1}$newVersion`${2}"
@@ -384,8 +405,11 @@ if ($Channel -eq "debug" -or $EffectiveUpdateEndpoint) {
     }
     if ($EffectiveUpdateEndpoint) {
         $tauriConf.plugins.updater.endpoints = @($EffectiveUpdateEndpoint)
-        $tauriConf.plugins.updater.dangerousInsecureTransportProtocol = $false
-        $tauriConf.bundle.createUpdaterArtifacts = $true
+        $tauriConf.plugins.updater.dangerousInsecureTransportProtocol = $EffectiveUpdateEndpoint.StartsWith("http://", [System.StringComparison]::OrdinalIgnoreCase)
+        $tauriConf.bundle.createUpdaterArtifacts = [bool]$updaterPrivateKeyPath
+        if (-not $updaterPrivateKeyPath) {
+            Write-Warning-Custom "Artefatos do auto-update desativados porque a chave privada do updater nao foi encontrada."
+        }
     }
     $connectSources = @(
         "'self'",

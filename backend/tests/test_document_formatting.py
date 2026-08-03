@@ -6,11 +6,29 @@ from html import unescape
 
 from backend.app.services.documents import (
     replace_docx_paragraph_tokens,
+    simple_text_pdf,
     term_replacements,
 )
 
 
 class DocumentFormattingTests(unittest.TestCase):
+    def test_simple_text_report_generates_a_pdf(self) -> None:
+        report = simple_text_pdf(
+            "RELATORIO DE TROCA DE MAQUINA",
+            [
+                (
+                    "APLICATIVOS",
+                    [
+                        "Aplicativo com uma descricao longa que precisa ser "
+                        "quebrada corretamente em mais de uma linha no PDF."
+                    ],
+                )
+            ],
+        )
+
+        self.assertTrue(report.startswith(b"%PDF-1.4"))
+        self.assertTrue(report.endswith(b"%%EOF"))
+
     def test_term_replacements_preserve_the_original_word_runs(self) -> None:
         paragraph = (
             "<w:p>"

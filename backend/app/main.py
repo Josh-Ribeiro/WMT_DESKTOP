@@ -24,9 +24,11 @@ from .api import (
     users,
 )
 from .core.config import cors_origins
+from .core.logging_config import configure_logging
 from .repositories.state import StateConflictError, reconcile_interrupted_update_jobs
 
 logger = logging.getLogger("wmt.request")
+log_path = configure_logging()
 
 
 def create_app() -> FastAPI:
@@ -58,6 +60,15 @@ def create_app() -> FastAPI:
             request_id,
             elapsed_ms,
         )
+        if elapsed_ms >= 2000:
+            logger.warning(
+                "slow_request method=%s path=%s status=%s request_id=%s duration_ms=%.1f",
+                request.method,
+                request.url.path,
+                response.status_code,
+                request_id,
+                elapsed_ms,
+            )
         return response
 
     @app.exception_handler(StateConflictError)
@@ -72,11 +83,15 @@ def create_app() -> FastAPI:
         allow_origins=cors_origins(),
         allow_credentials=True,
         allow_methods=["GET", "HEAD", "OPTIONS", "POST", "PUT", "DELETE"],
-        allow_headers=["Accept", "Content-Type", "X-CSRF-Token"],
+        allow_headers=["Accept", "Authorization", "Content-Type", "X-CSRF-Token"],
         expose_headers=["Content-Disposition", "X-Missing-Placeholders"],
     )
     app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=5)
     app.router.add_event_handler("startup", reconcile_interrupted_update_jobs)
+
+    @app.on_event("startup")
+    def log_backend_startup() -> None:
+        logger.info("backend_started log_file=%s", log_path)
 
     routers = (
         diagnostics.router,

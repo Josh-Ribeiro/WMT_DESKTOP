@@ -80,7 +80,7 @@ SERVICE_NAME = "wmt-backend"
 API_VERSION = 1
 
 
-APP_VERSION = os.getenv("WMT_VERSION", "1.0.123").strip() or "1.0.123"
+APP_VERSION = os.getenv("WMT_VERSION", "1.0.127").strip() or "1.0.127"
 
 
 DEVELOPMENT_MODE = env_bool("WMT_DEV")

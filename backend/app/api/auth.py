@@ -4,6 +4,7 @@ from fastapi import Depends, Header, HTTPException, Query, Request, Response
 from fastapi import APIRouter
 
 from ..core.config import (
+    ALLOW_BEARER_AUTH,
     SSO_CLIENT_IP_FALLBACK,
     SSO_DEBUG_ENABLED,
     SSO_DESKTOP_FALLBACK,
@@ -78,13 +79,16 @@ def login(request: LoginRequest, response: Response, http_request: Request):
     set_session_cookie(response, token)
     audit("auth.login", user["username"])
 
-    return {
+    payload = {
         "user": user["username"],
         "role": user["role"],
         "permissions": role_permissions(user["role"]),
         "csrf_token": csrf_token,
         "expires_at": expires_at.isoformat(timespec="seconds") + "Z",
     }
+    if ALLOW_BEARER_AUTH:
+        payload["access_token"] = token
+    return payload
 
 
 @router.post("/api/auth/sso")
@@ -136,7 +140,7 @@ def sso_login(
             "mode": auth_mode,
         },
     )
-    return {
+    payload = {
         "user": user["username"],
         "role": user["role"],
         "permissions": role_permissions(user["role"]),
@@ -149,6 +153,9 @@ def sso_login(
         "csrf_token": csrf_token,
         "expires_at": expires_at.isoformat(timespec="seconds") + "Z",
     }
+    if ALLOW_BEARER_AUTH:
+        payload["access_token"] = token
+    return payload
 
 
 @router.get("/api/auth/sso/debug")

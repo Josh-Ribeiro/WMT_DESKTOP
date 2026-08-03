@@ -242,7 +242,17 @@ cargo build --release
 2. **Autorização**: RBAC (Role-Based Access Control)
 3. **Comunicação**: HTTPS no modo central; HTTP apenas em loopback no sidecar
 4. **Credenciais**: Use variáveis de ambiente, nunca commite `.env`
-5. **Logs**: Auditoria persistida e logs do sidecar no diretório da aplicação
+5. **Logs**: Auditoria persistida e logs do backend em `backend/data/logs/backend.log`
+
+Para acompanhar o backend central em tempo real no servidor:
+
+```powershell
+Get-Content C:\WMT\backend\data\logs\backend.log -Tail 100 -Wait
+```
+
+Os arquivos giram automaticamente ao atingir 10 MB e mantêm cinco históricos.
+Requisições que demoram 2 segundos ou mais são marcadas como `slow_request`.
+O diretório pode ser alterado com a variável de ambiente `WMT_LOG_DIR`.
 ## Login Windows sem IIS (Produção)
 
 O aplicativo desktop tenta primeiro restaurar uma sessão existente e depois
