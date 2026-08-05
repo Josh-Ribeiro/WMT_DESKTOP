@@ -166,6 +166,28 @@ def logged_user_from_host(host: str) -> str:
             except Exception:
                 pass
 
+    # WMI can fail from a non-interactive Scheduled Task even when Terminal
+    # Services RPC is available. QUSER accepts an IP address and does not
+    # require WinRM TrustedHosts, so use the active console session as the
+    # next Windows-native fallback.
+    try:
+        result = subprocess.run(
+            ["quser.exe", f"/server:{target}"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=10,
+        )
+        if result.returncode == 0:
+            rows = [line.strip() for line in (result.stdout or "").splitlines() if line.strip()]
+            for row in rows[1:]:
+                columns = row.lstrip(">").split()
+                if columns:
+                    return columns[0]
+    except Exception:
+        pass
+
     executable = powershell_executable()
     if executable is None:
         raise HTTPException(status_code=401, detail="PowerShell não encontrado para consultar usuário remoto")

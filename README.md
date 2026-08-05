@@ -282,6 +282,8 @@ WMT_SSO_CLIENT_IP_FALLBACK=true
 WMT_SSO_TRUSTED_PROXY_IPS=127.0.0.1,::1
 WMT_SSO_ALLOWED_GROUPS=CN=WMT-Users,OU=Groups,DC=empresa,DC=local
 WMT_SSO_ADMIN_GROUPS=CN=WMT-Admins,OU=Groups,DC=empresa,DC=local
+WMT_SSO_ADMIN_USERS=usuario.admin@empresa.local
+WMT_SSO_DEFAULT_ROLE=viewer
 
 WMT_LOGIN_RATE_LIMIT_MAX_ATTEMPTS=5
 WMT_LOGIN_RATE_LIMIT_WINDOW_SECONDS=300
@@ -294,6 +296,12 @@ SSO e seus fallbacks ficam desativados por padrão e devem ser habilitados
 explicitamente. Quando SSO está ativo, `WMT_SSO_ALLOWED_GROUPS` é obrigatório;
 uma configuração vazia é recusada. `WMT_SSO_DEBUG_ENABLED` permanece
 desativada.
+
+Use `WMT_SSO_ADMIN_GROUPS` para promover membros de grupos do AD e
+`WMT_SSO_ADMIN_USERS` para exceções nominais, separadas por vírgula ou
+ponto e vírgula. Sem uma dessas regras, os usuários SSO recebem
+`WMT_SSO_DEFAULT_ROLE` (por padrão, `viewer`). Papéis atribuídos manualmente
+na tela administrativa têm precedência sobre as regras SSO.
 
 As origens CORS de produção devem ser adicionadas explicitamente em
 `WMT_CORS_ORIGINS`. Localhost só é aceito automaticamente com `WMT_DEV=true`.
@@ -381,7 +389,68 @@ pnpm install
 ```
 
 ### Erro: "Backend não conecta"
-Verificar se o backend está rodando em `http://localhost:8000`
+
+Verifique os endpoints e a tarefa agendada:
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:8000/health/live
+Invoke-RestMethod http://127.0.0.1:8000/health/ready
+Get-ScheduledTask -TaskName "WMT Backend"
+Get-ScheduledTaskInfo -TaskName "WMT Backend"
+```
+
+O backend está pronto somente quando `/health/ready` retorna `status=ready`.
+Os logs ficam em `backend\data\logs\backend.log` na instalação do projeto.
+
+Para reiniciar, use a tarefa registrada, não execute `python main.py` em uma
+segunda janela:
+
+```powershell
+Stop-ScheduledTask -TaskName "WMT Backend"
+Start-ScheduledTask -TaskName "WMT Backend"
+```
+
+Depois confirme que existe apenas um listener na porta 8000:
+
+```powershell
+Get-NetTCPConnection -LocalPort 8000 -State Listen
+```
+
+### Erro: login SSO diz que o host está inacessível
+
+No modo central sem identidade encaminhada pelo IIS, o backend identifica o
+usuário consultando a estação de origem. A conta da tarefa `WMT Backend` deve
+ter acesso remoto às workstations, e WMI/RPC ou Terminal Services RPC precisa
+estar liberado na rede.
+
+```powershell
+Test-Connection 10.0.0.10 -Count 2
+quser /server:10.0.0.10
+Get-CimInstance -ComputerName 10.0.0.10 -ClassName Win32_ComputerSystem
+```
+
+Proxies Windows podem enviar `X-Forwarded-For` no formato
+`10.0.0.10:porta-temporaria`. O backend normaliza esse formato antes da
+consulta. A porta observada, como `60116`, não é uma porta de serviço da
+workstation e não deve ser usada nos testes.
+
+Prefira IIS com Windows Authentication encaminhando `X-Remote-User` (ou
+`X-IIS-WinAuth-User`); isso evita depender da consulta remota por IP. Veja
+[Configuração do IIS com Windows Authentication](docs/iis-windows-auth-setup.md).
+
+### Usuário SSO entrou como `viewer`, mas deveria ser `admin`
+
+Confira se as regras administrativas estão disponíveis para o processo que
+executa o backend:
+
+```powershell
+[Environment]::GetEnvironmentVariable("WMT_SSO_ADMIN_GROUPS", "Machine")
+[Environment]::GetEnvironmentVariable("WMT_SSO_ADMIN_USERS", "Machine")
+```
+
+Após corrigir as variáveis, reinicie a tarefa `WMT Backend` e faça logout/login
+para renovar a sessão. Não use `WMT_SSO_DEFAULT_ROLE=admin`: configure grupos,
+usuários nominais ou atribua o papel manualmente pela administração do WMT.
 
 ### Erro: "PowerShell scripts não executam"
 Verificar permissões de execução:

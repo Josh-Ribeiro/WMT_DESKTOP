@@ -46,6 +46,24 @@ from ..services.auth import (
 router = APIRouter()
 
 
+def _forwarded_client_host(x_forwarded_for: str | None) -> str:
+    """Return the host from the first X-Forwarded-For entry.
+
+    Some Windows proxies include the ephemeral source port even though the
+    standard header normally contains only an address.
+    """
+    value = (x_forwarded_for or "").split(",", 1)[0].strip()
+    if value.startswith("["):
+        closing = value.find("]")
+        if closing > 0:
+            return value[1:closing]
+    if value.count(":") == 1:
+        host, port = value.rsplit(":", 1)
+        if host and port.isdigit():
+            return host
+    return value
+
+
 @router.post("/api/auth/login")
 def login(request: LoginRequest, response: Response, http_request: Request):
     client_ip = http_request.client.host if http_request.client else "unknown"
@@ -103,8 +121,8 @@ def sso_login(
     if not SSO_ENABLED:
         raise HTTPException(status_code=404, detail="SSO is disabled")
 
-    direct_client_ip = request.client.host if request.client else ""
-    forwarded_client_ip = (x_forwarded_for or "").split(",", 1)[0].strip()
+    direct_client_ip = _forwarded_client_host(request.client.host if request.client else "")
+    forwarded_client_ip = _forwarded_client_host(x_forwarded_for)
     trusted_proxy = direct_client_ip in SSO_TRUSTED_PROXY_IPS
     client_ip = forwarded_client_ip if trusted_proxy and forwarded_client_ip else direct_client_ip
     identity = x_remote_user or x_windows_user or x_iis_winauth_user
@@ -167,8 +185,8 @@ def sso_debug(
     if not SSO_DEBUG_ENABLED:
         raise HTTPException(status_code=404, detail="SSO diagnostics are disabled")
 
-    direct_client_ip = request.client.host if request.client else ""
-    forwarded_client_ip = (x_forwarded_for or "").split(",", 1)[0].strip()
+    direct_client_ip = _forwarded_client_host(request.client.host if request.client else "")
+    forwarded_client_ip = _forwarded_client_host(x_forwarded_for)
     trusted_proxy = direct_client_ip in SSO_TRUSTED_PROXY_IPS
     client_ip = forwarded_client_ip if trusted_proxy and forwarded_client_ip else direct_client_ip
     identity = ""
